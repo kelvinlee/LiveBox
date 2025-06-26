@@ -10,10 +10,12 @@
             <el-button type="primary" class="startListen" @click="startListen">
                 开始采集
             </el-button>
-
-            <el-button type="primary" class="startListen" @click="openWindow">
-                新窗口
+            <el-button type="primary" class="startListen" @click="clearLivex">
+                关闭采集
             </el-button>
+            <!-- <el-button type="primary" class="startListen" @click="openWindow">
+                新窗口
+            </el-button> -->
         </div>
         <!-- 下面直播间:左侧直播，右侧评论 -->
         <div class="liveBox">
@@ -62,9 +64,9 @@
                         :size-dependencies="[item.name, item.msg]"
                         :data-index="item.id"
                     >
-                        <div class="content">
+                        <div class="content" :class="item.type">
                             <span class="name">{{ item.name }}：</span>
-                            <span class="msg">{{ item.msg }}</span>
+                            <span class="msg" v-html="item.msg"></span>
                         </div>
                     </DynamicScrollerItem>
                 </template>
@@ -97,14 +99,14 @@
                 </el-checkbox-group>
             </div>
             <!-- 添加录制视频和弹幕 -->
-            <div class="messageSel">
+            <!-- <div class="messageSel">
                 <span>直播录制配置：</span>
                 <el-checkbox-group v-model="recordVideo">
                     <el-checkbox label="开启录制" value="open" />
                     <el-checkbox label="录制弹幕" value="chat" />
                     <el-checkbox label="录制礼物" value="gift" />
                 </el-checkbox-group>
-            </div>
+            </div> -->
             <div class="tips">
                 *推送的消息会以POST请求的形式发送到该地址，请确保该地址能够接收POST请求
             </div>
@@ -124,6 +126,7 @@
 import { Setting } from '@element-plus/icons-vue'
 import { invoke } from '@tauri-apps/api/tauri'
 import { ref } from 'vue'
+import { default as axios } from 'axios'
 import { DPlayerImp, LiveInfoImp } from '@/types'
 import Logo from '@/assets/logo.png'
 import { ConnectionConfig } from 'tauri-plugin-websocket-api'
@@ -142,8 +145,9 @@ const dialogVisible = ref(false)
 const messageList = ref([
     {
         id: '1',
-        name: '1024小神',
-        msg: '欢迎使用直播盒子，输入直播地址开始安静看直播，没有刷礼物功能，所以理性看播，不要乱消费',
+        type: 'chat',
+        name: 'Kelvin',
+        msg: '欢迎使用弹幕工具',
     },
 ])
 // websocket client
@@ -167,7 +171,7 @@ const liveInfo = ref({
 const diamond = ref(0)
 
 // 推送流地址
-const pushUrl = ref('')
+const pushUrl = ref(localStorage.getItem('pushUrl') || '')
 // 选中消息类型
 const checkList = ref<string[]>(['chat', 'gift', 'like'])
 // 录制视频
@@ -207,8 +211,10 @@ const handlePay = () => {
 // 开始监听
 const startListen = async () => {
     const url = inputUrl.value.trim()
+    const pushUrlStr = pushUrl.value.trim()
     // console.log('直播间地址:', proto)
     localStorage.setItem('url', url)
+    localStorage.setItem('pushUrl', pushUrlStr)
     // 先清空历史直播
     clearLivex()
     // 再开始新的直播
@@ -274,8 +280,9 @@ const clearLivex = () => {
     messageList.value = [
         {
             id: '1',
-            name: '1024小神',
-            msg: '欢迎使用直播盒子，输入直播地址开始安静看直播，没有刷礼物功能，所以理性看播，不要乱消费',
+            type: 'chat',
+            name: 'Kelvin',
+            msg: '欢迎使用弹幕工具',
         },
     ]
     socketClient?.disconnect()
@@ -317,6 +324,7 @@ const loadLive = (videoUrl: string, live: boolean = true) => {
             screenshot: false,
             autoplay: true,
             live: live,
+            volume: 0,
             lang: 'zh-cn', // zh-cn // en
             video: {
                 url: '',
@@ -334,6 +342,7 @@ const loadLive = (videoUrl: string, live: boolean = true) => {
         dplayer = new DPlayer({
             container: document.getElementById(`dplayer`),
             live: live,
+            volume: 0,
             autoplay: true,
             screenshot: false,
             fullScreen: false,
@@ -348,6 +357,7 @@ const loadLive = (videoUrl: string, live: boolean = true) => {
             container: document.getElementById(`dplayer`),
             screenshot: false,
             live: live,
+            volume: 0,
             autoplay: true,
             lang: 'zh-cn', // zh-cn // en
             video: {
@@ -468,7 +478,7 @@ const handleMessage = (messageList: douyin.Message) => {
                 break
             // 待解析方法
             default:
-                console.log('待解析方法' + msg.method)
+                // console.log('待解析方法' + msg.method)
                 break
         }
     })
@@ -480,12 +490,25 @@ const decodeChat = (data) => {
     // console.log('chatMsg-----', chatMsg)
     const { common, user, content } = chatMsg
     const message = {
-        id: common.msgId,
+        id: common.msgId.toString(),
+        type: 'chat',
         name: user.nickName,
         msg: content,
     }
+    const postData = {
+        id: common.msgId.toString(),
+        type: 'chat',
+        user: user,
+        content: content,
+    }
     checkList.value.includes('chat') && messageList.value.push(message)
-    // console.log('chatMsg---', user.nickName, content)
+    // console.log('chatMsg---', user.nickName, chatMsg)
+    if (pushUrl.value == "") return;
+    try {
+        axios.post(pushUrl.value, postData);
+    } catch (error) {
+
+    }
 }
 // 解析礼物消息
 const decodeGift = (data) => {
@@ -493,13 +516,27 @@ const decodeGift = (data) => {
     // console.log('giftMsg---', giftMsg)
     const { common, user, gift, repeatCount } = giftMsg
     const message = {
-        id: common.msgId,
+        id: common.msgId.toString(),
+        type: 'gift',
         name: user.nickName,
-        msg: `送出${gift.name} x${repeatCount}个`,
+        msg: `送出 <image src="${gift.icon.urlListList[0]}" style="width: 20px; margin-top:-0.2em"/> ${gift.name} x${repeatCount}个 (${gift.diamondCount}钻)`,
     }
     checkList.value.includes('gift') && messageList.value.push(message)
     // 计算主播收益
     diamond.value = diamond.value + gift.diamondCount * repeatCount
+    const postData = {
+        id: common.msgId.toString(),
+        type: 'gift',
+        user: user,
+        gift: gift,
+        repeatCount: repeatCount,
+    }
+    if (pushUrl.value == "") return;
+    try {
+        axios.post(pushUrl.value, postData);
+    } catch (error) {
+
+    }
 }
 
 // 进入房间
@@ -507,7 +544,8 @@ const enterLive = (data) => {
     const enteryMsg = douyin.MemberMessage.decode(data)
     const { common, user } = enteryMsg
     const message = {
-        id: common.msgId,
+        id: common.msgId.toString(),
+        type: 'join',
         name: user.nickName,
         msg: '来了',
     }
@@ -519,9 +557,10 @@ const enterLive = (data) => {
 const likeLive = (data) => {
     const likeMsg = douyin.LikeMessage.decode(data)
     // console.log('likeMsg---', likeMsg)
-    const { common, user, total } = likeMsg
+    const { common, user, total, count } = likeMsg
     const message = {
-        id: common.msgId,
+        id: common.msgId.toString(),
+        type: 'like',
         name: user.nickName,
         msg: `为主播点赞了`,
     }
@@ -530,6 +569,18 @@ const likeLive = (data) => {
         totalLike: total,
     }
     checkList.value.includes('like') && messageList.value.push(message)
+    const postData = {
+        id: common.msgId.toString(),
+        type: 'like',
+        user: user,
+        like: count,
+    }
+    if (pushUrl.value == "") return;
+    try {
+        axios.post(pushUrl.value, postData);
+    } catch (error) {
+
+    }
 }
 
 // 关注主播
@@ -537,7 +588,8 @@ const followLive = (data) => {
     const followMsg = douyin.SocialMessage.decode(data)
     const { common, user, followCount } = followMsg
     const message = {
-        id: common.msgId,
+        id: common.msgId.toString(),
+        type: 'follow',
         name: user.nickName,
         msg: `关注了主播`,
     }
@@ -753,6 +805,17 @@ const msgScroll = (event) => {
                 .msg {
                     color: white;
                     white-space: wrap;
+                }
+                
+                .gift {
+                    .msg {
+                        color: #eba825;
+                    }
+                }
+                .like {
+                    .msg {
+                        color: gray;
+                    }
                 }
             }
         }
