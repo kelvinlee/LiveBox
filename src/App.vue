@@ -519,17 +519,17 @@ const decodeGift = (data) => {
         id: common.msgId.toString(),
         type: 'gift',
         name: user.nickName,
-        msg: `送出 <image src="${gift.icon.urlListList[0]}" style="width: 20px; margin-top:-0.2em"/> ${gift.name} x${repeatCount}个 (${gift.diamondCount}钻)`,
+        msg: `送出 <image src="${gift.icon.urlListList[0]}" style="width: 20px; margin-top:-0.2em"/> ${gift.name} x${repeatCount.toString()}个 (${gift.diamondCount.toString()}钻)`,
     }
     checkList.value.includes('gift') && messageList.value.push(message)
     // 计算主播收益
-    diamond.value = diamond.value + gift.diamondCount * repeatCount
+    diamond.value = diamond.value + gift.diamondCount * parseInt(repeatCount.toString())
     const postData = {
         id: common.msgId.toString(),
         type: 'gift',
         user: user,
         gift: gift,
-        repeatCount: repeatCount,
+        repeatCount: parseInt(repeatCount.toString()),
     }
     if (pushUrl.value == "") return;
     try {
@@ -573,7 +573,7 @@ const likeLive = (data) => {
         id: common.msgId.toString(),
         type: 'like',
         user: user,
-        like: count,
+        like: parseInt(count.toString()),
     }
     if (pushUrl.value == "") return;
     try {
