@@ -10,7 +10,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             command::live::get_live_html,
             command::live::greet_you,
-            command::live::open_window
+            command::live::open_window,
+            command::live::run_npm_dev
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

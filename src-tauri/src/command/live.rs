@@ -1,6 +1,8 @@
 use crate::command::model::LiveInfo;
 use crate::command::runner::DouYinReq;
 use std::io::Read;
+use std::path::Path;
+use std::process::Command;
 use std::time::Instant;
 use tauri::AppHandle;
 
@@ -82,4 +84,29 @@ pub async fn open_window(
         .build()
         .unwrap();
     }
+}
+
+#[tauri::command]
+pub async fn run_npm_dev(project_path: String) -> Result<String, String> {
+    let path = Path::new(&project_path);
+    if !path.exists() || !path.is_dir() {
+        return Err("项目目录不存在或不是文件夹".to_string());
+    }
+
+    let mut command = if cfg!(target_os = "windows") {
+        let mut cmd = Command::new("cmd");
+        cmd.arg("/C").arg("npm run dev");
+        cmd
+    } else {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg("npm run dev");
+        cmd
+    };
+
+    command.current_dir(path);
+    command
+        .spawn()
+        .map_err(|e| format!("启动 npm run dev 失败: {}", e))?;
+
+    Ok("npm run dev 已启动".to_string())
 }

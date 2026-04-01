@@ -87,6 +87,16 @@
     >
         <div class="setBox">
             <el-input v-model="pushUrl" placeholder="请输入推送地址" />
+            <div class="projectPathRow">
+                <el-input
+                    v-model="projectPath"
+                    placeholder="请选择 Node.js 项目目录"
+                    readonly
+                />
+                <el-button class="selectPathBtn" @click="selectProjectPath">
+                    选择目录
+                </el-button>
+            </div>
             <!-- 选择消息类型 -->
             <div class="messageSel">
                 <span>选择消息类型：</span>
@@ -138,6 +148,7 @@ import Flv from 'flv.js'
 import pako from 'pako'
 import SocketCli from '@/utils/RustSocket'
 import { emit, listen } from '@tauri-apps/api/event'
+import { open } from '@tauri-apps/api/dialog'
 
 // 直播间地址
 const inputUrl = ref(localStorage.getItem('url') || '')
@@ -172,6 +183,8 @@ const diamond = ref(0)
 
 // 推送流地址
 const pushUrl = ref(localStorage.getItem('pushUrl') || '')
+// Node.js 项目目录
+const projectPath = ref(localStorage.getItem('projectPath') || '')
 // 选中消息类型
 const checkList = ref<string[]>(['chat', 'gift', 'like'])
 // 录制视频
@@ -212,9 +225,22 @@ const handlePay = () => {
 const startListen = async () => {
     const url = inputUrl.value.trim()
     const pushUrlStr = pushUrl.value.trim()
+    const projectPathStr = projectPath.value.trim()
     // console.log('直播间地址:', proto)
     localStorage.setItem('url', url)
     localStorage.setItem('pushUrl', pushUrlStr)
+    localStorage.setItem('projectPath', projectPathStr)
+    if (!projectPathStr) {
+        ElMessage.error('请先选择项目后台目录')
+        return
+    }
+    try {
+        await invoke('run_npm_dev', { projectPath: projectPathStr })
+    } catch (error) {
+        ElMessage.error('启动 npm run dev 失败，请检查目录或环境')
+        console.error(error)
+        return
+    }
     // 先清空历史直播
     clearLivex()
     // 再开始新的直播
@@ -270,6 +296,19 @@ const startListen = async () => {
             console.log('没有获取到')
             ElMessage.error('open live error')
         }
+    }
+}
+
+// 选择 Node.js 项目目录
+const selectProjectPath = async () => {
+    const selected = await open({
+        directory: true,
+        multiple: false,
+        title: '选择 Node.js 项目目录',
+    })
+    if (typeof selected === 'string') {
+        projectPath.value = selected
+        localStorage.setItem('projectPath', selected)
     }
 }
 
@@ -638,10 +677,12 @@ const msgScroll = (event) => {
     .liveUrl {
         display: flex;
         flex-direction: row;
-        justify-content: center;
+        justify-content: flex-start;
         align-items: center;
         height: 36px;
         width: 100%;
+        padding: 0 20px;
+        box-sizing: border-box;
 
         .urlInput {
             width: 50%;
@@ -830,6 +871,17 @@ const msgScroll = (event) => {
 
 .setBox {
     margin: 2vh 20px;
+
+    .projectPathRow {
+        display: flex;
+        align-items: center;
+        margin-top: 8px;
+
+        .selectPathBtn {
+            margin-left: 8px;
+            flex-shrink: 0;
+        }
+    }
 
     .messageSel {
         margin-top: 4px;
