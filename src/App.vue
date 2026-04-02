@@ -86,6 +86,7 @@
         width="540"
     >
         <div class="setBox">
+            <el-input v-model="roomId" placeholder="请输入房间号" />
             <el-input v-model="pushUrl" placeholder="请输入推送地址" />
             <div class="projectPathRow">
                 <el-input
@@ -95,6 +96,16 @@
                 />
                 <el-button class="selectPathBtn" @click="selectProjectPath">
                     选择目录
+                </el-button>
+            </div>
+            <div class="projectPathRow">
+                <el-input
+                    v-model="exePath"
+                    placeholder="请选择 exe 文件"
+                    readonly
+                />
+                <el-button class="selectPathBtn" @click="selectExePath">
+                    选择 exe
                 </el-button>
             </div>
             <!-- 选择消息类型 -->
@@ -183,8 +194,12 @@ const diamond = ref(0)
 
 // 推送流地址
 const pushUrl = ref(localStorage.getItem('pushUrl') || '')
+// 启动 exe 使用的房间号
+const roomId = ref(localStorage.getItem('roomId') || '')
 // Node.js 项目目录
 const projectPath = ref(localStorage.getItem('projectPath') || '')
+// exe 文件路径
+const exePath = ref(localStorage.getItem('exePath') || '')
 // 选中消息类型
 const checkList = ref<string[]>(['chat', 'gift', 'like'])
 // 录制视频
@@ -225,24 +240,40 @@ const handlePay = () => {
 const startListen = async () => {
     const url = inputUrl.value.trim()
     const pushUrlStr = pushUrl.value.trim()
+    const roomIdStr = roomId.value.trim()
     const projectPathStr = projectPath.value.trim()
+    const exePathStr = exePath.value.trim()
     // console.log('直播间地址:', proto)
     localStorage.setItem('url', url)
     localStorage.setItem('pushUrl', pushUrlStr)
+    localStorage.setItem('roomId', roomIdStr)
     localStorage.setItem('projectPath', projectPathStr)
+    localStorage.setItem('exePath', exePathStr)
+    if (!roomIdStr) {
+        ElMessage.error('请先输入房间号')
+        return
+    }
     if (!projectPathStr) {
         ElMessage.error('请先选择项目后台目录')
         return
     }
+    if (!exePathStr) {
+        ElMessage.error('请先选择 exe 文件')
+        return
+    }
+    // 先清空历史直播和外部进程
+    await clearLivex()
     try {
         await invoke('run_npm_dev', { projectPath: projectPathStr })
+        await invoke('run_external_exe', {
+            exePath: exePathStr,
+            roomId: roomIdStr,
+        })
     } catch (error) {
-        ElMessage.error('启动 npm run dev 失败，请检查目录或环境')
+        ElMessage.error('启动失败，请检查目录、exe 或环境')
         console.error(error)
         return
     }
-    // 先清空历史直播
-    clearLivex()
     // 再开始新的直播
     if (url.trim()) {
         // 根据直播间地址获取roomid等字段
@@ -312,8 +343,26 @@ const selectProjectPath = async () => {
     }
 }
 
+// 选择 exe 文件
+const selectExePath = async () => {
+    const selected = await open({
+        multiple: false,
+        title: '选择 exe 文件',
+        filters: [{ name: 'Executable', extensions: ['exe'] }],
+    })
+    if (typeof selected === 'string') {
+        exePath.value = selected
+        localStorage.setItem('exePath', selected)
+    }
+}
+
 // 清空直播和聊天内容
-const clearLivex = () => {
+const clearLivex = async () => {
+    try {
+        await invoke('stop_external_processes')
+    } catch (error) {
+        console.error('stop_external_processes error:', error)
+    }
     // console.log('清空')
     dplayer?.destroy()
     messageList.value = [
@@ -544,7 +593,7 @@ const decodeChat = (data) => {
     // console.log('chatMsg---', user.nickName, chatMsg)
     if (pushUrl.value == "") return;
     try {
-        axios.post(pushUrl.value, postData);
+        axios.post(pushUrl.value+'/'+roomId.value, postData);
     } catch (error) {
 
     }
@@ -572,7 +621,7 @@ const decodeGift = (data) => {
     }
     if (pushUrl.value == "") return;
     try {
-        axios.post(pushUrl.value, postData);
+        axios.post(pushUrl.value+'/'+roomId.value, postData);
     } catch (error) {
 
     }
@@ -616,7 +665,7 @@ const likeLive = (data) => {
     }
     if (pushUrl.value == "") return;
     try {
-        axios.post(pushUrl.value, postData);
+        axios.post(pushUrl.value+'/'+roomId.value, postData);
     } catch (error) {
 
     }

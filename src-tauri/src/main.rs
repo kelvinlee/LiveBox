@@ -11,7 +11,9 @@ fn main() {
             command::live::get_live_html,
             command::live::greet_you,
             command::live::open_window,
-            command::live::run_npm_dev
+            command::live::run_npm_dev,
+            command::live::run_external_exe,
+            command::live::stop_external_processes
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

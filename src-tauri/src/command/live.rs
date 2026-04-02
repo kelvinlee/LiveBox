@@ -2,9 +2,52 @@ use crate::command::model::LiveInfo;
 use crate::command::runner::DouYinReq;
 use std::io::Read;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Child, Command};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 use tauri::AppHandle;
+
+static NPM_PROCESS: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
+static EXE_PROCESS: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
+
+fn npm_process() -> &'static Mutex<Option<Child>> {
+    NPM_PROCESS.get_or_init(|| Mutex::new(None))
+}
+
+fn exe_process() -> &'static Mutex<Option<Child>> {
+    EXE_PROCESS.get_or_init(|| Mutex::new(None))
+}
+
+fn kill_child(child: &mut Child) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let pid = child.id().to_string();
+        let status = Command::new("taskkill")
+            .args(["/PID", pid.as_str(), "/T", "/F"])
+            .status()
+            .map_err(|e| format!("taskkill 执行失败: {}", e))?;
+        if !status.success() {
+            return Err("taskkill 返回失败状态".to_string());
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        child
+            .kill()
+            .map_err(|e| format!("结束进程失败: {}", e))?;
+    }
+    Ok(())
+}
+
+fn stop_process_slot(slot: &Mutex<Option<Child>>) -> Result<(), String> {
+    let mut guard = slot.lock().map_err(|_| "进程锁获取失败".to_string())?;
+    if let Some(mut child) = guard.take() {
+        let _ = kill_child(&mut child);
+        let _ = child.wait();
+    }
+    Ok(())
+}
 
 // 自定义函数
 #[tauri::command]
@@ -103,10 +146,46 @@ pub async fn run_npm_dev(project_path: String) -> Result<String, String> {
         cmd
     };
 
+    stop_process_slot(npm_process())?;
     command.current_dir(path);
-    command
+    let child = command
         .spawn()
         .map_err(|e| format!("启动 npm run dev 失败: {}", e))?;
+    let mut guard = npm_process()
+        .lock()
+        .map_err(|_| "npm 进程锁获取失败".to_string())?;
+    *guard = Some(child);
 
     Ok("npm run dev 已启动".to_string())
+}
+
+#[tauri::command]
+pub async fn run_external_exe(exe_path: String, room_id: String) -> Result<String, String> {
+    let path = Path::new(&exe_path);
+    if !path.exists() || !path.is_file() {
+        return Err("exe 文件不存在".to_string());
+    }
+    if room_id.trim().is_empty() {
+        return Err("房间号不能为空".to_string());
+    }
+
+    stop_process_slot(exe_process())?;
+    let child = Command::new(path)
+        .arg("-roomId")
+        .arg(room_id)
+        .spawn()
+        .map_err(|e| format!("启动 exe 失败: {}", e))?;
+    let mut guard = exe_process()
+        .lock()
+        .map_err(|_| "exe 进程锁获取失败".to_string())?;
+    *guard = Some(child);
+
+    Ok("exe 已启动".to_string())
+}
+
+#[tauri::command]
+pub async fn stop_external_processes() -> Result<String, String> {
+    stop_process_slot(npm_process())?;
+    stop_process_slot(exe_process())?;
+    Ok("外部进程已停止".to_string())
 }
