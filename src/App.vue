@@ -265,6 +265,8 @@ const startListen = async () => {
     await clearLivex()
     try {
         await invoke('run_npm_dev', { projectPath: projectPathStr })
+        // 给后端服务启动留出时间，避免 exe 连接失败
+        await new Promise((resolve) => setTimeout(resolve, 5000))
         await invoke('run_external_exe', {
             exePath: exePathStr,
             roomId: roomIdStr,
@@ -516,6 +518,7 @@ const onMessage = (msg: any) => {
 // 遍历消息数组，拿到具体的消息
 const handleMessage = (messageList: douyin.Message) => {
     messageList.forEach((msg) => {
+        // console.log('msg---', msg)
         // 判断消息类型
         switch (msg.method) {
             // 反对分数
@@ -534,7 +537,7 @@ const handleMessage = (messageList: douyin.Message) => {
                 break
             // 礼物消息
             case 'WebcastGiftMessage':
-                // console.log('礼物消息')
+                console.log('礼物消息', msg)
                 decodeGift(msg.payload)
                 break
             // 聊天弹幕消息
@@ -566,11 +569,84 @@ const handleMessage = (messageList: douyin.Message) => {
                 break
             // 待解析方法
             default:
-                // console.log('待解析方法' + msg.method)
+                console.log('待解析方法' + msg.method)
                 break
         }
     })
 }
+// 聊天推送：POST 进行中时先入队，本次请求结束后再发下一批，避免并发请求导致丢消息、请求过多
+let chatPushBuffer: Array<{
+    id: string
+    type: string
+    user: unknown
+    content: string
+}> = []
+let chatPushSending = false
+
+const scheduleChatPush = () => {
+    if (chatPushSending || chatPushBuffer.length === 0) return
+    chatPushSending = true
+    const batch = chatPushBuffer.splice(0, chatPushBuffer.length)
+    const url = pushUrl.value + '/' + roomId.value
+    const body = { type: 'chat_batch', items: batch }
+    axios
+        .post(url, body)
+        .catch(() => {})
+        .finally(() => {
+            chatPushSending = false
+            scheduleChatPush()
+        })
+}
+
+// 礼物推送：同聊天，合并 items
+let giftPushBuffer: Array<{
+    id: string
+    type: string
+    user: unknown
+    gift: unknown
+    repeatCount: number
+}> = []
+let giftPushSending = false
+
+const scheduleGiftPush = () => {
+    if (giftPushSending || giftPushBuffer.length === 0) return
+    giftPushSending = true
+    const batch = giftPushBuffer.splice(0, giftPushBuffer.length)
+    const url = pushUrl.value + '/' + roomId.value
+    const body = { type: 'gift_batch', items: batch }
+    axios
+        .post(url, body)
+        .catch(() => {})
+        .finally(() => {
+            giftPushSending = false
+            scheduleGiftPush()
+        })
+}
+
+// 点赞推送：同聊天，合并 items
+let likePushBuffer: Array<{
+    id: string
+    type: string
+    user: unknown
+    like: number
+}> = []
+let likePushSending = false
+
+const scheduleLikePush = () => {
+    if (likePushSending || likePushBuffer.length === 0) return
+    likePushSending = true
+    const batch = likePushBuffer.splice(0, likePushBuffer.length)
+    const url = pushUrl.value + '/' + roomId.value
+    const body = { type: 'like_batch', items: batch }
+    axios
+        .post(url, body)
+        .catch(() => {})
+        .finally(() => {
+            likePushSending = false
+            scheduleLikePush()
+        })
+}
+
 // 解析弹幕消息
 const decodeChat = (data) => {
     // 校验消息
@@ -593,7 +669,8 @@ const decodeChat = (data) => {
     // console.log('chatMsg---', user.nickName, chatMsg)
     if (pushUrl.value == "") return;
     try {
-        axios.post(pushUrl.value+'/'+roomId.value, postData);
+        chatPushBuffer.push(postData)
+        scheduleChatPush()
     } catch (error) {
 
     }
@@ -601,7 +678,7 @@ const decodeChat = (data) => {
 // 解析礼物消息
 const decodeGift = (data) => {
     const giftMsg = douyin.GiftMessage.decode(data)
-    // console.log('giftMsg---', giftMsg)
+    console.log('giftMsg---', giftMsg)
     const { common, user, gift, repeatCount } = giftMsg
     const message = {
         id: common.msgId.toString(),
@@ -621,7 +698,8 @@ const decodeGift = (data) => {
     }
     if (pushUrl.value == "") return;
     try {
-        axios.post(pushUrl.value+'/'+roomId.value, postData);
+        giftPushBuffer.push(postData)
+        scheduleGiftPush()
     } catch (error) {
 
     }
@@ -665,7 +743,8 @@ const likeLive = (data) => {
     }
     if (pushUrl.value == "") return;
     try {
-        axios.post(pushUrl.value+'/'+roomId.value, postData);
+        likePushBuffer.push(postData)
+        scheduleLikePush()
     } catch (error) {
 
     }
