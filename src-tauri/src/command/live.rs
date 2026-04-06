@@ -57,12 +57,12 @@ pub async fn greet_you(name: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn get_live_html(url: &str) -> Result<LiveInfo, String> {
+pub async fn get_live_html(url: &str, cookie: Option<String>) -> Result<LiveInfo, String> {
     // let response = reqwest::get(live_url).await.unwrap();
     // println!("调用了get_live_html");
     let mut live_req = DouYinReq::new(url);
-    // 获取直播间room_id和主播信息
-    let result = live_req.get_room_info().await;
+    // 获取直播间room_id和主播信息（cookie 为从登录 WebView 同步的整段 Cookie，可选）
+    let result = live_req.get_room_info(cookie.as_deref()).await;
     match result {
         Ok(info) => Ok(info),
         Err(_) => Err("This failed!".into()),
@@ -79,7 +79,7 @@ pub async fn open_window(
     resize: bool,
     width: f64,
     height: f64,
-    js_content: String,
+    _js_content: String,
 ) {
     let window_label = "previewWeb";
     // if let Some(existing_window) = handle.get_window(window_label) {

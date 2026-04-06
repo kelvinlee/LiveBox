@@ -108,6 +108,16 @@
                     选择 exe
                 </el-button>
             </div>
+            <div class="messageSel douyinLoginRow">
+                <span>抖音登录（礼物等需登录态）：</span>
+                <el-button size="small" @click="openDouyinLogin">
+                    打开登录页
+                </el-button>
+                <el-button type="primary" size="small" @click="syncDouyinCookies">
+                    同步 Cookie
+                </el-button>
+                <span v-if="douyinCookie" class="cookieOk">已保存 Cookie</span>
+            </div>
             <!-- 选择消息类型 -->
             <div class="messageSel">
                 <span>选择消息类型：</span>
@@ -200,6 +210,8 @@ const roomId = ref(localStorage.getItem('roomId') || '')
 const projectPath = ref(localStorage.getItem('projectPath') || '')
 // exe 文件路径
 const exePath = ref(localStorage.getItem('exePath') || '')
+// 从登录 WebView 同步的整段 Cookie，用于拉房间页与 WebSocket（localStorage 持久化）
+const douyinCookie = ref(localStorage.getItem('douyinCookie') || '')
 // 选中消息类型
 const checkList = ref<string[]>(['chat', 'gift', 'like'])
 // 录制视频
@@ -211,6 +223,26 @@ const liveMsg = ref()
 // 直播播放器
 let dplayer: DPlayerImp | null = null
 let liveNum = 100
+
+const openDouyinLogin = async () => {
+    try {
+        await invoke('open_douyin_login_window')
+        ElMessage.success('已打开登录窗口，请在窗口内完成登录后点「同步 Cookie」')
+    } catch (e) {
+        ElMessage.error(String(e))
+    }
+}
+
+const syncDouyinCookies = async () => {
+    try {
+        const cookie = await invoke<string>('sync_douyin_cookies_from_webview')
+        douyinCookie.value = cookie
+        localStorage.setItem('douyinCookie', cookie)
+        ElMessage.success('Cookie 已保存: '+ cookie)
+    } catch (e) {
+        ElMessage.error(String(e))
+    }
+}
 
 // 新窗口
 const openWindow = () => {
@@ -279,7 +311,10 @@ const startListen = async () => {
     // 再开始新的直播
     if (url.trim()) {
         // 根据直播间地址获取roomid等字段
-        const roomJson: LiveInfoImp = await invoke('get_live_html', { url })
+        const roomJson: LiveInfoImp = await invoke('get_live_html', {
+            url,
+            cookie: douyinCookie.value.trim() || null,
+        })
         // console.log('获取到的直播房间信息:', roomJson)
         // roomInfo
         const roomInfo = JSON.parse(roomJson.room_info)
@@ -307,7 +342,12 @@ const startListen = async () => {
                 ].replace('http://', 'https://')
                 loadLive(videoUrl)
                 // 加载websocket
-                creatSokcet(roomInfo.id_str, roomJson.unique_id, roomJson.ttwid)
+                creatSokcet(
+                    roomInfo.id_str,
+                    roomJson.unique_id,
+                    roomJson.ttwid,
+                    douyinCookie.value,
+                )
             } else {
                 ElMessage.success('live is over!')
                 liveInfo.value = {
@@ -379,7 +419,12 @@ const clearLivex = async () => {
 }
 
 // 创建websokcet
-const creatSokcet = async (roomId: string, uniqueId: string, ttwid: string) => {
+const creatSokcet = async (
+    roomId: string,
+    uniqueId: string,
+    ttwid: string,
+    fullCookie: string,
+) => {
     // console.log('创建连接', roomId, uniqueId)
     let sign = window.creatSignature(roomId, uniqueId)
     // console.log('sign----', sign)
@@ -395,7 +440,8 @@ const creatSokcet = async (roomId: string, uniqueId: string, ttwid: string) => {
         // maxFrameSize: 20000,
         // acceptUnmaskedFrames: true,
         headers: {
-            cookie: 'ttwid=' + ttwid,
+            cookie:
+                fullCookie.trim() !== '' ? fullCookie.trim() : 'ttwid=' + ttwid,
             'user-agent':
                 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0',
         },
@@ -1013,6 +1059,19 @@ const msgScroll = (event) => {
 
     .messageSel {
         margin-top: 4px;
+    }
+
+    .douyinLoginRow {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+
+        .cookieOk {
+            font-size: 12px;
+            color: #67c23a;
+        }
     }
 
     .tips {

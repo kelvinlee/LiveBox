@@ -14,6 +14,8 @@ fn main() {
             command::live::run_npm_dev,
             command::live::run_external_exe,
             command::live::stop_external_processes
+            command::douyin_login::open_douyin_login_window,
+            command::douyin_login::sync_douyin_cookies_from_webview,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
