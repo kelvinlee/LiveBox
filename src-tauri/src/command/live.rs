@@ -1,10 +1,8 @@
 use crate::command::model::LiveInfo;
 use crate::command::runner::DouYinReq;
-use std::io::Read;
 use std::path::Path;
 use std::process::{Child, Command};
 use std::sync::{Mutex, OnceLock};
-use std::time::Instant;
 use tauri::AppHandle;
 
 static NPM_PROCESS: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
