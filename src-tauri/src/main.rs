@@ -6,6 +6,7 @@ mod command;
 
 fn main() {
     tauri::Builder::default()
+        .manage(command::tiktok::TikTokState::default())
         .plugin(tauri_plugin_websocket::init())
         .invoke_handler(tauri::generate_handler![
             command::live::get_live_html,
@@ -16,7 +17,15 @@ fn main() {
             command::live::stop_external_processes,
             command::douyin_login::open_douyin_login_window,
             command::douyin_login::sync_douyin_cookies_from_webview,
+            command::tiktok::start_tiktok,
+            command::tiktok::stop_tiktok,
+            command::tiktok::refresh_tiktok_video,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                command::tiktok::shutdown(app);
+            }
+        });
 }

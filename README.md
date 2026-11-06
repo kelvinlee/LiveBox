@@ -7,6 +7,8 @@
 
 ## 功能介绍
 
+新增 Windows TikTok 独立采集入口，支持弹幕、礼物、点赞和视频播放。开发、打包和消息格式见 [TikTok Windows 说明](docs/tiktok-windows.md)。
+
 可以获取直播视频和主播头像和昵称，直播聊天弹幕内容，但是屏蔽刷礼物功能，禁止刷礼物禁止消费，理性看播，看紧口袋。
 windows/mac/linux 下载地址：https://github.com/Sjj1024/LiveBox/releases
 

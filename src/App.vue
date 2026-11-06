@@ -418,6 +418,9 @@ const clearLivex = async () => {
     socketClient?.disconnect()
 }
 
+// 仅供平台入口在切换页面时停止原有采集。
+defineExpose({ stop: clearLivex })
+
 // 创建websokcet
 const creatSokcet = async (
     roomId: string,

@@ -10,6 +10,13 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.venv-tiktok/
+.build/
+.cache/
+.tools/
+src-tauri/tiktok-worker/
+__pycache__/
+*.pyc
 *.local
 
 # Editor directories and files

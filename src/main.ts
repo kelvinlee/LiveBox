@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import App from './App.vue'
+import App from './PlatformRoot.vue'
 import '@/assets/static/vFun.js'
 import ElementPlus from 'element-plus'
 import './assets/static/global.css'

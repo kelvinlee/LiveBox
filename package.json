@@ -4,6 +4,9 @@
     "version": "0.0.0",
     "type": "module",
     "scripts": {
+        "tiktok:build": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-tiktok.ps1",
+        "tauri:tiktok:dev": "tauri dev --config src-tauri/tauri.tiktok.conf.json",
+        "tauri:tiktok:build": "tauri build --config src-tauri/tauri.tiktok.conf.json",
         "dev": "vite",
         "build": "vue-tsc --noEmit && vite build",
         "preview": "vite preview",

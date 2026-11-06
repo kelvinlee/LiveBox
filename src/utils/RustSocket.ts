@@ -86,8 +86,10 @@ class SocketCli {
 
     // 断开连接
     disconnect() {
+        clearInterval(this.heartbeatTimer)
         if (this.ws) {
             this.ws.disconnect()
+            this.ws = null
         }
     }
 }
