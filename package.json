@@ -4,12 +4,12 @@
     "version": "0.0.0",
     "type": "module",
     "scripts": {
-        "dev": "vite",
+        "dev": "vite --host",
         "build": "vue-tsc --noEmit && vite build",
         "preview": "vite preview",
         "build proto": "pnpm pbjs -t static-module -w es6 -o src/proto/dy.js src/proto/dy.proto",
         "tauri": "tauri",
-        "tauri dev": "tauri dev",
+        "tauri dev": "tauri dev --host",
         "tauri debug": "tauri build -d",
         "tauri build": "tauri build"
     },

@@ -4,6 +4,7 @@ import '@/assets/static/vFun.js'
 import ElementPlus from 'element-plus'
 import './assets/static/global.css'
 import 'element-plus/dist/index.css'
+import 'element-plus/theme-chalk/dark/css-vars.css'
 import 'vue-virtual-scroller/dist/vue-virtual-scroller.css'
 import VirtualScroller from 'vue-virtual-scroller'
 

@@ -30,7 +30,7 @@ pub async fn open_douyin_login_window(handle: AppHandle) -> Result<(), String> {
             LABEL,
             tauri::WindowUrl::External(login_url),
         )
-        .title("抖音登录 - LiveBox")
+        .title("抖音登录 - GiccooBox")
         .inner_size(1000.0, 800.0)
         .center()
         .build()

@@ -11,12 +11,25 @@ fn main() {
             command::live::get_live_html,
             command::live::greet_you,
             command::live::open_window,
+            command::live::open_livebox_window,
             command::live::run_npm_dev,
             command::live::run_external_exe,
             command::live::stop_external_processes,
+            command::live::get_backend_logs,
+            command::live::stop_npm_dev,
+            command::live::restart_npm_dev,
+            command::live::check_douyin_login,
+            command::gift::get_gift_catalog,
+            command::gift::add_gift_kinds,
             command::douyin_login::open_douyin_login_window,
             command::douyin_login::sync_douyin_cookies_from_webview,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            // 程序退出时结束后台和 exe
+            if let tauri::RunEvent::Exit = event {
+                command::live::stop_backend_on_exit();
+            }
+        });
 }

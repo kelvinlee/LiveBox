@@ -7,8 +7,8 @@
         "withGlobalTauri": true
     },
     "package": {
-        "productName": "LiveBox",
-        "version": "0.0.5"
+        "productName": "GiccooBox",
+        "version": "0.0.6"
     },
     "tauri": {
         "allowlist": {
@@ -24,7 +24,7 @@
         },
         "windows": [
             {
-                "title": "Livebox",
+                "title": "GiccooBox",
                 "width": 900,
                 "height": 600
             }
