@@ -28,7 +28,7 @@ fn exe_process() -> &'static Mutex<Option<Child>> {
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-fn hide_console(command: &mut Command) {
+pub(crate) fn hide_console(command: &mut Command) {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -177,7 +177,7 @@ fn spawn_log_reader<R: Read + Send + 'static>(
     });
 }
 
-fn kill_child(child: &mut Child) -> Result<(), String> {
+pub(crate) fn kill_child(child: &mut Child) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let pid = child.id().to_string();
@@ -435,34 +435,101 @@ pub async fn run_npm_dev(
     Ok(true)
 }
 
+/// 本程序启动的 exe 对应的路径和房间号：两者都没变时复用正在运行的 exe
+static EXE_ARGS: Mutex<Option<(String, String)>> = Mutex::new(None);
+
+/// 同名的 exe 是否已经在运行（包括不是本程序启动的，例如手动打开的）
+fn exe_running_by_name(path: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let Some(name) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            return false;
+        };
+        let mut command = Command::new("tasklist");
+        hide_console(&mut command);
+        let Ok(output) = command
+            .args(["/FI", &format!("IMAGENAME eq {}", name), "/FO", "CSV", "/NH"])
+            .stdin(Stdio::null())
+            .output()
+        else {
+            return false;
+        };
+        // 找到时每行是 "名称","PID",...；找不到时是一行提示文字
+        let text = String::from_utf8_lossy(&output.stdout).to_lowercase();
+        text.contains(&format!("\"{}\"", name.to_lowercase()))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// 启动 exe。已经在运行就复用，不会关闭重开；只有 exe 路径或房间号变了才重启。
+/// 返回 true 表示本次新启动了 exe
 #[tauri::command]
-pub async fn run_external_exe(exe_path: String, room_id: String) -> Result<String, String> {
+pub async fn run_external_exe(exe_path: String, room_id: String) -> Result<bool, String> {
     let path = Path::new(&exe_path);
     if !path.exists() || !path.is_file() {
         return Err("exe 文件不存在".to_string());
     }
-    if room_id.trim().is_empty() {
+    let room_id = room_id.trim().to_string();
+    if room_id.is_empty() {
         return Err("房间号不能为空".to_string());
     }
+    let wanted = (exe_path.trim().to_lowercase(), room_id.clone());
 
-    stop_process_slot(exe_process())?;
-    let child = Command::new(path)
-        .arg("-roomId")
-        .arg(room_id)
-        .spawn()
-        .map_err(|e| format!("启动 exe 失败: {}", e))?;
     let mut guard = exe_process()
         .lock()
         .map_err(|_| "exe 进程锁获取失败".to_string())?;
-    *guard = Some(child);
+    let mut args = EXE_ARGS
+        .lock()
+        .map_err(|_| "exe 进程锁获取失败".to_string())?;
 
-    Ok("exe 已启动".to_string())
+    let ours_running = match guard.as_mut() {
+        Some(child) => matches!(child.try_wait(), Ok(None)),
+        None => false,
+    };
+    if ours_running {
+        if args.as_ref() == Some(&wanted) {
+            // 本程序启动的 exe 还在运行，参数也没变：直接复用
+            return Ok(false);
+        }
+        // exe 路径或房间号变了：关闭旧的再按新参数启动
+        if let Some(mut child) = guard.take() {
+            let _ = kill_child(&mut child);
+            let _ = child.wait();
+        }
+    } else {
+        // 本程序启动的 exe 已经退出了，清掉记录
+        if let Some(mut child) = guard.take() {
+            let _ = child.wait();
+        }
+        // 不是本程序启动的同名 exe 正在运行(例如手动打开的)：不再重复打开
+        if exe_running_by_name(path) {
+            *args = None;
+            return Ok(false);
+        }
+    }
+
+    let child = Command::new(path)
+        .arg("-roomId")
+        .arg(&room_id)
+        .spawn()
+        .map_err(|e| format!("启动 exe 失败: {}", e))?;
+    *guard = Some(child);
+    *args = Some(wanted);
+    Ok(true)
 }
 
+/// 停止采集时关闭 exe
 #[tauri::command]
 pub async fn stop_external_processes() -> Result<String, String> {
     // npm 作为共享后台保留，不在此停止
     stop_process_slot(exe_process())?;
+    if let Ok(mut args) = EXE_ARGS.lock() {
+        *args = None;
+    }
     Ok("外部进程已停止".to_string())
 }
 

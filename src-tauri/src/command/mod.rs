@@ -3,3 +3,4 @@ pub mod gift;
 pub mod live;
 pub mod model;
 pub mod runner;
+pub mod tiktok;

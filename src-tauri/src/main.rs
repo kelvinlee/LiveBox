@@ -21,15 +21,28 @@ fn main() {
             command::live::check_douyin_login,
             command::gift::get_gift_catalog,
             command::gift::add_gift_kinds,
+            command::tiktok::check_tiktok_env,
+            command::tiktok::install_tiktok_env,
+            command::tiktok::install_python,
+            command::tiktok::start_tiktok,
+            command::tiktok::stop_tiktok,
+            command::tiktok::check_tiktok_live,
             command::douyin_login::open_douyin_login_window,
             command::douyin_login::sync_douyin_cookies_from_webview,
         ])
+        .on_window_event(|event| {
+            // 窗口关闭时结束这个窗口的 TikTok 采集
+            if let tauri::WindowEvent::Destroyed = event.event() {
+                command::tiktok::stop_for_window(event.window().label());
+            }
+        })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, event| {
             // 程序退出时结束后台和 exe
             if let tauri::RunEvent::Exit = event {
                 command::live::stop_backend_on_exit();
+                command::tiktok::stop_all();
             }
         });
 }

@@ -1,29 +1,40 @@
-//! 礼物种类的长期存储。
+//! 礼物种类的长期存储，抖音和 TikTok 各存一份。
 //!
-//! 保存在应用数据目录下的 gift_catalog.json 里，不依赖 WebView 的 localStorage，
-//! 清理浏览数据或者打开多个窗口都不会丢。
+//! 保存在应用数据目录下（抖音 gift_catalog.json，TikTok gift_catalog_tiktok.json），
+//! 不依赖 WebView 的 localStorage，清理浏览数据或者打开多个窗口都不会丢。
 
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use tauri::{AppHandle, Manager};
 
-const GIFT_CATALOG_FILE: &str = "gift_catalog.json";
+/// 内存中的礼物列表：key 为平台，第一次使用时从文件加载
+static GIFT_CATALOGS: OnceLock<Mutex<HashMap<String, Vec<Value>>>> = OnceLock::new();
 
-/// 内存中的礼物列表：第一次使用时从文件加载
-static GIFT_CATALOG: OnceLock<Mutex<Option<Vec<Value>>>> = OnceLock::new();
-
-fn catalog() -> &'static Mutex<Option<Vec<Value>>> {
-    GIFT_CATALOG.get_or_init(|| Mutex::new(None))
+fn catalogs() -> &'static Mutex<HashMap<String, Vec<Value>>> {
+    GIFT_CATALOGS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn catalog_path(handle: &AppHandle) -> Result<PathBuf, String> {
+/// 平台名：只认 tiktok，其他都当作抖音（兼容旧版本没有平台参数的调用）
+fn normalize_platform(platform: Option<String>) -> String {
+    match platform.as_deref() {
+        Some("tiktok") => "tiktok".to_string(),
+        _ => "douyin".to_string(),
+    }
+}
+
+fn catalog_path(handle: &AppHandle, platform: &str) -> Result<PathBuf, String> {
     let dir = handle
         .path_resolver()
         .app_data_dir()
         .ok_or_else(|| "无法获取应用数据目录".to_string())?;
-    Ok(dir.join(GIFT_CATALOG_FILE))
+    let file = match platform {
+        "tiktok" => "gift_catalog_tiktok.json",
+        _ => "gift_catalog.json",
+    };
+    Ok(dir.join(file))
 }
 
 fn gift_id(kind: &Value) -> Option<&str> {
@@ -31,8 +42,8 @@ fn gift_id(kind: &Value) -> Option<&str> {
 }
 
 /// 从文件读取。文件不存在时返回空列表；文件损坏时备份后返回空列表，避免之后的写入把它覆盖掉。
-fn load_from_file(handle: &AppHandle) -> Result<Vec<Value>, String> {
-    let path = catalog_path(handle)?;
+fn load_from_file(handle: &AppHandle, platform: &str) -> Result<Vec<Value>, String> {
+    let path = catalog_path(handle, platform)?;
     if !path.exists() {
         return Ok(Vec::new());
     }
@@ -47,8 +58,8 @@ fn load_from_file(handle: &AppHandle) -> Result<Vec<Value>, String> {
 }
 
 /// 写入文件：先写临时文件再改名，写到一半断电或崩溃也不会损坏原文件
-fn save_to_file(handle: &AppHandle, list: &[Value]) -> Result<(), String> {
-    let path = catalog_path(handle)?;
+fn save_to_file(handle: &AppHandle, platform: &str, list: &[Value]) -> Result<(), String> {
+    let path = catalog_path(handle, platform)?;
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| format!("创建数据目录失败: {}", e))?;
     }
@@ -59,25 +70,36 @@ fn save_to_file(handle: &AppHandle, list: &[Value]) -> Result<(), String> {
     Ok(())
 }
 
-/// 获取所有记录过的礼物种类
+/// 获取某个平台记录过的礼物种类
 #[tauri::command]
-pub async fn get_gift_catalog(handle: AppHandle) -> Result<Vec<Value>, String> {
-    let mut guard = catalog().lock().map_err(|_| "礼物列表锁获取失败".to_string())?;
-    if guard.is_none() {
-        *guard = Some(load_from_file(&handle)?);
+pub async fn get_gift_catalog(
+    handle: AppHandle,
+    platform: Option<String>,
+) -> Result<Vec<Value>, String> {
+    let platform = normalize_platform(platform);
+    let mut map = catalogs().lock().map_err(|_| "礼物列表锁获取失败".to_string())?;
+    if !map.contains_key(&platform) {
+        let list = load_from_file(&handle, &platform)?;
+        map.insert(platform.clone(), list);
     }
-    Ok(guard.clone().unwrap_or_default())
+    Ok(map.get(&platform).cloned().unwrap_or_default())
 }
 
 /// 记录新的礼物种类：已存在的 id 会被跳过。返回实际新增的数量。
 #[tauri::command]
-pub async fn add_gift_kinds(handle: AppHandle, kinds: Vec<Value>) -> Result<usize, String> {
+pub async fn add_gift_kinds(
+    handle: AppHandle,
+    platform: Option<String>,
+    kinds: Vec<Value>,
+) -> Result<usize, String> {
+    let platform = normalize_platform(platform);
     let added: Vec<Value> = {
-        let mut guard = catalog().lock().map_err(|_| "礼物列表锁获取失败".to_string())?;
-        if guard.is_none() {
-            *guard = Some(load_from_file(&handle)?);
+        let mut map = catalogs().lock().map_err(|_| "礼物列表锁获取失败".to_string())?;
+        if !map.contains_key(&platform) {
+            let list = load_from_file(&handle, &platform)?;
+            map.insert(platform.clone(), list);
         }
-        let list = guard.as_mut().expect("礼物列表已加载");
+        let list = map.get_mut(&platform).expect("礼物列表已加载");
         let mut added = Vec::new();
         for kind in kinds {
             let Some(id) = gift_id(&kind) else {
@@ -90,13 +112,16 @@ pub async fn add_gift_kinds(handle: AppHandle, kinds: Vec<Value>) -> Result<usiz
             added.push(kind);
         }
         if !added.is_empty() {
-            save_to_file(&handle, list)?;
+            save_to_file(&handle, &platform, list)?;
         }
         added
     };
     // 通知所有窗口同步
     if !added.is_empty() {
-        let _ = handle.emit_all("gift-kinds-added", &added);
+        let _ = handle.emit_all(
+            "gift-kinds-added",
+            json!({ "platform": platform, "kinds": added }),
+        );
     }
     Ok(added.len())
 }

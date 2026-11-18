@@ -32,6 +32,13 @@
                 >
                     <template #reference>
                         <button class="btn roomBtn" title="已保存的直播间">
+                            <span
+                                v-if="activeRoom"
+                                class="platformIcon"
+                                :class="detectPlatform(activeRoom.url)"
+                            >
+                                {{ platformGlyph(activeRoom.url) }}
+                            </span>
                             <span class="roomBtnText">
                                 {{ activeRoom ? activeRoom.name : '直播间' }}
                             </span>
@@ -75,6 +82,13 @@
                                 :class="{ active: room.url === inputUrl.trim() }"
                                 @click="selectRoom(room)"
                             >
+                                <span
+                                    class="platformIcon"
+                                    :class="detectPlatform(room.url)"
+                                    :title="platformName(detectPlatform(room.url))"
+                                >
+                                    {{ platformGlyph(room.url) }}
+                                </span>
                                 <div class="roomInfo">
                                     <div class="roomName">
                                         <span class="roomNameText">
@@ -136,7 +150,7 @@
                 >
                     {{ startButtonText }}
                 </button>
-                <button class="btn" @click="clearLivex">停止</button>
+                <button class="btn" @click="clearLivex()">停止</button>
             </div>
             <div class="tools">
                 <span class="status" :class="socketStatus">
@@ -217,19 +231,59 @@
             </section>
 
             <!-- 右侧：消息列表 -->
-            <aside class="chat">
+            <!-- scroll 事件不冒泡，用捕获阶段监听消息列表的滚动 -->
+            <aside
+                class="chat"
+                @scroll.capture="onMsgScroll"
+                @wheel.passive="markMsgUserAction"
+                @touchmove.passive="markMsgUserAction"
+                @keydown="markMsgUserAction"
+                @pointerdown="onMsgPointerDown"
+            >
+                <!-- 翻看历史消息时，有新消息就提示，点击回到最新 -->
+                <button
+                    v-if="!msgStickBottom"
+                    class="toLatest"
+                    @click="scrollToBottom(true)"
+                >
+                    {{
+                        unreadMsgCount
+                            ? `${unreadMsgCount > 99 ? '99+' : unreadMsgCount} 条新消息`
+                            : '回到最新'
+                    }}
+                    <el-icon :size="12"><ArrowDown /></el-icon>
+                </button>
                 <div class="panelHead">
                     <span class="panelTitle">消息</span>
-                    <span class="panelMeta">{{ messageList.length }}</span>
+                    <span class="panelMeta">{{ visibleMessages.length }}</span>
+                </div>
+                <!-- 消息筛选：可多选，不选任何类型即显示全部 -->
+                <div class="msgFilter">
+                    <button
+                        class="chip"
+                        :class="{ active: !msgFilter.length }"
+                        @click="toggleMsgFilter(null)"
+                    >
+                        全部
+                    </button>
+                    <button
+                        v-for="f in MSG_FILTERS"
+                        :key="f.key"
+                        class="chip"
+                        :class="[f.key, { active: msgFilter.includes(f.key) }]"
+                        @click="toggleMsgFilter(f.key)"
+                    >
+                        {{ f.label }}
+                    </button>
                 </div>
                 <!-- 长列表优化 -->
                 <DynamicScroller
-                    :items="messageList"
+                    :items="visibleMessages"
                     :min-item-size="28"
                     class="chatList"
                     id="liveMsg"
                     ref="liveMsg"
-                    v-if="messageList.length"
+                    v-if="visibleMessages.length"
                 >
                     <template v-slot="{ item, active }">
                         <DynamicScrollerItem
@@ -252,6 +306,9 @@
                         </DynamicScrollerItem>
                     </template>
                 </DynamicScroller>
+                <div v-else class="chatEmpty">
+                    {{ msgFilter.length ? '暂无符合筛选的消息' : '暂无消息' }}
+                </div>
             </aside>
         </main>
 
@@ -309,6 +366,24 @@
     <!-- 补发礼物 -->
     <el-dialog v-model="resendVisible" title="补发礼物" width="520">
         <div class="resend">
+            <!-- 两套礼物：抖音 / TikTok -->
+            <div class="platformTabs">
+                <span
+                    v-for="p in PLATFORMS"
+                    :key="p"
+                    class="platformTab"
+                    :class="{ active: resendPlatform === p }"
+                    @click="switchResendPlatform(p)"
+                >
+                    <span class="platformIcon" :class="p">
+                        {{ p === 'tiktok' ? 'T' : '抖' }}
+                    </span>
+                    {{ platformName(p) }}礼物
+                    <span class="platformCount">
+                        {{ giftCatalogs[p].length }}
+                    </span>
+                </span>
+            </div>
             <div class="resendUser">
                 <img
                     v-if="resendTarget.avatar"
@@ -345,7 +420,7 @@
                 </div>
                 <div v-if="!filteredGifts.length" class="giftEmpty">
                     {{
-                        giftCatalog.length
+                        giftCatalogs[resendPlatform].length
                             ? '没有匹配的礼物'
                             : '还没有收到过礼物，采集到的礼物种类会自动记录在这里'
                     }}
@@ -425,6 +500,25 @@
             </div>
             <p class="formHint">礼物等消息需要登录态</p>
             <div class="formRow">
+                <label>TikTok 代理</label>
+                <el-input
+                    v-model="tiktokProxy"
+                    placeholder="例如 http://127.0.0.1:7890，不需要可不填"
+                    clearable
+                />
+            </div>
+            <div class="formRow">
+                <label>Python</label>
+                <el-input
+                    v-model="pythonPath"
+                    placeholder="自动查找，找不到时填写 python.exe 的路径"
+                    clearable
+                />
+            </div>
+            <p class="formHint">
+                TikTok 采集不需要登录，依赖 Python 3.10+ 和 TikTokLive 组件，缺少时会提示自动安装
+            </p>
+            <div class="formRow">
                 <label>消息类型</label>
                 <el-checkbox-group v-model="checkList">
                     <el-checkbox label="聊天" value="chat" />
@@ -448,6 +542,7 @@ import { ArrowDown, Moon, Setting, Sunny } from '@element-plus/icons-vue'
 import { invoke } from '@tauri-apps/api/tauri'
 import {
     computed,
+    h,
     markRaw,
     nextTick,
     onBeforeUnmount,
@@ -466,6 +561,7 @@ import Hls from 'hls.js'
 import Flv from 'flv.js'
 import pako from 'pako'
 import SocketCli, { SocketStatus } from '@/utils/RustSocket'
+import { getCurrent } from '@tauri-apps/api/window'
 import { emit, listen } from '@tauri-apps/api/event'
 import { open } from '@tauri-apps/api/dialog'
 
@@ -510,7 +606,7 @@ const getLocalBoolean = (key: string, defaultValue: boolean = true) => {
     if (value === null) return defaultValue
     return value === 'true'
 }
-const messageList = ref([
+const messageList = ref<any[]>([
     {
         id: '1',
         type: 'chat',
@@ -520,18 +616,42 @@ const messageList = ref([
 ])
 // websocket client
 let socketClient: SocketCli | null = null
-// websocket 连接状态
-const socketStatus = ref<SocketStatus>('closed')
+// 采集连接状态：抖音由 websocket 更新，TikTok 由采集进程更新
+type CollectStatus = SocketStatus | 'connecting'
+const socketStatus = ref<CollectStatus>('closed')
 const socketStatusText = computed(() => {
     switch (socketStatus.value) {
         case 'connected':
             return '已连接'
+        case 'connecting':
+            return '连接中'
         case 'reconnecting':
             return '重连中'
         default:
             return '未连接'
     }
 })
+
+// ---------- 平台 ----------
+type Platform = 'douyin' | 'tiktok'
+const PLATFORMS: Platform[] = ['douyin', 'tiktok']
+// 根据地址判断平台：tiktok.com 的地址或 @用户名 为 TikTok，其他为抖音
+const detectPlatform = (url: string): Platform =>
+    /tiktok\.com/i.test(url) || url.trim().startsWith('@') ? 'tiktok' : 'douyin'
+const platformName = (platform: Platform) =>
+    platform === 'tiktok' ? 'TikTok' : '抖音'
+const platformGlyph = (url: string) =>
+    detectPlatform(url) === 'tiktok' ? 'T' : '抖'
+// 当前采集的平台
+const collectPlatform = ref<Platform>('douyin')
+
+// 文字转义：聊天、昵称等内容来自观众，不能直接当 HTML 渲染
+const escapeHtml = (text: unknown) =>
+    String(text ?? '').replace(
+        /[&<>"']/g,
+        (c) =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string,
+    )
 // 主题：黑白两色切换，未设置过时跟随系统
 const isDark = ref(
     (localStorage.getItem('theme') ??
@@ -559,6 +679,8 @@ const startButtonText = computed(() => {
     switch (socketStatus.value) {
         case 'connected':
             return '采集中'
+        case 'connecting':
+            return '连接中'
         case 'reconnecting':
             return '重连中'
         default:
@@ -599,6 +721,11 @@ const useBackend = ref(getLocalBoolean('useBackend', true))
 const useExe = ref(getLocalBoolean('useExe', true))
 // 从登录 WebView 同步的整段 Cookie，用于拉房间页与 WebSocket（localStorage 持久化）
 const douyinCookie = ref(localStorage.getItem('douyinCookie') || '')
+// TikTok 代理与 Python 路径
+const tiktokProxy = ref(localStorage.getItem('tiktokProxy') || '')
+const pythonPath = ref(localStorage.getItem('pythonPath') || '')
+watch(tiktokProxy, (v) => localStorage.setItem('tiktokProxy', v.trim()))
+watch(pythonPath, (v) => localStorage.setItem('pythonPath', v.trim()))
 // 选中消息类型
 const checkList = ref<string[]>(['chat', 'gift', 'like'])
 // 录制视频
@@ -658,6 +785,13 @@ const formatAge = (ms: number) => {
 
 // 登录状态：level 为 ok 时是正常提示，warn 时需要用户处理
 const loginState = computed(() => {
+    if (detectPlatform(inputUrl.value) === 'tiktok') {
+        return {
+            level: 'none',
+            text: '免登录',
+            detail: 'TikTok 采集不需要登录',
+        }
+    }
     const cookie = douyinCookie.value.trim()
     if (!cookie) {
         return {
@@ -792,26 +926,31 @@ interface GiftKind {
     icon: string
     gift: any
 }
-// 礼物种类长期保存在应用数据目录的 gift_catalog.json 里(由 Rust 端读写)，
+// 礼物种类长期保存在应用数据目录里(由 Rust 端读写)，抖音和 TikTok 各一份，
 // 不放在 localStorage：清理浏览数据不会丢，多个窗口共用同一份
-const giftCatalog = ref<GiftKind[]>([])
-const knownGiftIds = new Set<string>()
+const giftCatalogs = ref<Record<Platform, GiftKind[]>>({ douyin: [], tiktok: [] })
+const knownGiftIds: Record<Platform, Set<string>> = {
+    douyin: new Set(),
+    tiktok: new Set(),
+}
 
 // 把礼物种类加入当前窗口的列表(不写文件)
-const addGiftKindsLocal = (kinds: GiftKind[]) => {
+const addGiftKindsLocal = (platform: Platform, kinds: GiftKind[]) => {
+    const known = knownGiftIds[platform]
+    if (!known) return
     kinds.forEach((kind) => {
-        if (!kind || !kind.id || knownGiftIds.has(kind.id)) return
-        knownGiftIds.add(kind.id)
+        if (!kind || !kind.id || known.has(kind.id)) return
+        known.add(kind.id)
         // 礼物数据不需要响应式
-        giftCatalog.value.push({ ...kind, gift: markRaw(kind.gift || {}) })
+        giftCatalogs.value[platform].push({ ...kind, gift: markRaw(kind.gift || {}) })
     })
 }
 
 // 写入长期存储，失败时提示一次
 let giftSaveErrorShown = false
-const saveGiftKinds = async (kinds: GiftKind[]) => {
+const saveGiftKinds = async (platform: Platform, kinds: GiftKind[]) => {
     try {
-        await invoke('add_gift_kinds', { kinds })
+        await invoke('add_gift_kinds', { platform, kinds })
     } catch (e) {
         console.error('保存礼物种类失败:', e)
         if (!giftSaveErrorShown) {
@@ -825,17 +964,19 @@ let unlistenGiftKinds: (() => void) | null = null
 onMounted(async () => {
     try {
         // 其他窗口记录了新的礼物种类时同步过来
-        unlistenGiftKinds = await listen<GiftKind[]>(
+        unlistenGiftKinds = await listen<{ platform: Platform; kinds: GiftKind[] }>(
             'gift-kinds-added',
-            (event) => addGiftKindsLocal(event.payload),
+            (event) => addGiftKindsLocal(event.payload.platform, event.payload.kinds),
         )
-        // 加载已保存的礼物种类。加载完成前本窗口已经收到的礼物也要补存进去
-        const receivedBeforeLoad = giftCatalog.value.slice()
-        const saved = await invoke<GiftKind[]>('get_gift_catalog')
-        const savedIds = new Set(saved.map((g) => g.id))
-        addGiftKindsLocal(saved)
-        const missing = receivedBeforeLoad.filter((g) => !savedIds.has(g.id))
-        if (missing.length) await saveGiftKinds(missing)
+        for (const platform of PLATFORMS) {
+            // 加载已保存的礼物种类。加载完成前本窗口已经收到的礼物也要补存进去
+            const receivedBeforeLoad = giftCatalogs.value[platform].slice()
+            const saved = await invoke<GiftKind[]>('get_gift_catalog', { platform })
+            const savedIds = new Set(saved.map((g) => g.id))
+            addGiftKindsLocal(platform, saved)
+            const missing = receivedBeforeLoad.filter((g) => !savedIds.has(g.id))
+            if (missing.length) await saveGiftKinds(platform, missing)
+        }
     } catch (e) {
         console.error('加载礼物种类失败:', e)
     }
@@ -845,8 +986,8 @@ onBeforeUnmount(() => {
 })
 
 // 收到礼物时记录它的种类：只有第一次见到的礼物才会写入
-const recordGiftKind = (giftId: string, gift: any) => {
-    if (!gift || !giftId || giftId === '0' || knownGiftIds.has(giftId)) return
+const recordGiftKind = (platform: Platform, giftId: string, gift: any) => {
+    if (!gift || !giftId || giftId === '0' || knownGiftIds[platform].has(giftId)) return
     // 转成普通对象，和正常推送给后台的格式一致
     const giftJson = typeof gift.toJSON === 'function' ? gift.toJSON() : gift
     const kind: GiftKind = {
@@ -856,8 +997,8 @@ const recordGiftKind = (giftId: string, gift: any) => {
         icon: gift.icon?.urlListList?.[0] || '',
         gift: giftJson,
     }
-    addGiftKindsLocal([kind])
-    saveGiftKinds([kind])
+    addGiftKindsLocal(platform, [kind])
+    saveGiftKinds(platform, [kind])
 }
 
 // 消息里保留观众信息用于补发，不需要响应式
@@ -871,17 +1012,26 @@ const resendTarget = ref<{ name: string; avatar: string; user: any }>({
     user: null,
 })
 const resendGiftId = ref('')
+// 补发使用哪一套礼物
+const resendPlatform = ref<Platform>('douyin')
+const switchResendPlatform = (platform: Platform) => {
+    if (resendPlatform.value === platform) return
+    resendPlatform.value = platform
+    resendGiftId.value = ''
+}
 const resendCount = ref(1)
 const giftKeyword = ref('')
 // 价格高的排在前面
 const filteredGifts = computed(() => {
     const keyword = giftKeyword.value.trim().toLowerCase()
-    return giftCatalog.value
+    return giftCatalogs.value[resendPlatform.value]
         .filter((g) => !keyword || g.name.toLowerCase().includes(keyword))
         .sort((a, b) => b.diamondCount - a.diamondCount)
 })
 const selectedGift = computed(() =>
-    giftCatalog.value.find((g) => g.id === resendGiftId.value),
+    giftCatalogs.value[resendPlatform.value].find(
+        (g) => g.id === resendGiftId.value,
+    ),
 )
 
 // 点击消息列表里的观众，打开补发礼物
@@ -892,6 +1042,10 @@ const openResend = (item: any) => {
         avatar: item.user.AvatarThumb?.urlListList?.[0] || '',
         user: markRaw(item.user),
     }
+    // 默认使用这条消息所在平台的礼物
+    const platform: Platform = item.platform === 'tiktok' ? 'tiktok' : 'douyin'
+    if (resendPlatform.value !== platform) resendGiftId.value = ''
+    resendPlatform.value = platform
     resendCount.value = 1
     giftKeyword.value = ''
     resendVisible.value = true
@@ -917,6 +1071,7 @@ const sendResend = async () => {
         repeatCount: count,
         totalCount: count,
         repeatEnd: 1,
+        platform: resendPlatform.value,
         // 标记这是手动补发的礼物
         resend: true,
     }
@@ -933,7 +1088,8 @@ const sendResend = async () => {
             type: 'gift',
             name: target.name,
             user: target.user,
-            msg: `补发 <image src="${kind.icon}" style="width: 20px; margin-top:-0.2em"/> ${kind.name} x${count}个 (${kind.diamondCount}钻)`,
+            platform: resendPlatform.value,
+            msg: `补发 ${giftIconHtml(kind.icon)} ${escapeHtml(kind.name)} x${count}个 (${kind.diamondCount}钻)`,
         })
         resendVisible.value = false
     } catch (e) {
@@ -985,8 +1141,19 @@ const setRoomLive = (url: string, live: boolean) => {
     roomLive.value[url] = { live, at: Date.now() }
 }
 
-// 拉取直播间页面判断是否在直播；获取失败按未开播处理
+// 判断直播间是否在直播；获取失败按未开播处理
 const fetchRoomLive = async (url: string) => {
+    if (detectPlatform(url) === 'tiktok') {
+        try {
+            const live = await invoke<boolean | null>('check_tiktok_live', {
+                uniqueId: url,
+                proxy: tiktokProxy.value.trim() || null,
+            })
+            return live === true
+        } catch {
+            return false
+        }
+    }
     try {
         const roomJson = await invoke<LiveInfoImp>('get_live_html', {
             url,
@@ -1232,7 +1399,7 @@ const startListen = async () => {
     }
     if (starting) return
     starting = true
-    if (loginState.value.level === 'warn') {
+    if (detectPlatform(url) === 'douyin' && loginState.value.level === 'warn') {
         ElMessage.warning(loginState.value.detail)
     }
     try {
@@ -1259,8 +1426,8 @@ const doStartListen = async (
     shouldUseBackend: boolean,
     shouldUseExe: boolean,
 ) => {
-    // 先清空历史直播和外部进程
-    await clearLivex()
+    // 先清空历史直播。exe 不在这里关闭：已经在运行就复用，只有点「停止」才关闭
+    await clearLivex(false)
     try {
         // 后台是否是本次新启动的：已经在运行则直接复用，不会重启
         let backendStarted = false
@@ -1275,10 +1442,14 @@ const doStartListen = async (
             await new Promise((resolve) => setTimeout(resolve, 5000))
         }
         if (shouldUseExe) {
-            await invoke('run_external_exe', {
+            // 已经在运行就复用；exe 路径或房间号变了才会重启
+            await invoke<boolean>('run_external_exe', {
                 exePath: exePathStr,
                 roomId: roomIdStr,
             })
+        } else {
+            // 没有勾选「使用 exe」：之前打开的 exe 关掉
+            await invoke('stop_external_processes')
         }
     } catch (error) {
         ElMessage.error('启动失败，请检查目录、exe 或环境')
@@ -1286,6 +1457,12 @@ const doStartListen = async (
         return
     }
     // 再开始新的直播
+    if (url.trim() && detectPlatform(url) === 'tiktok') {
+        await startTikTok(url)
+        return
+    }
+    collectPlatform.value = 'douyin'
+    collecting = true
     if (url.trim()) {
         // 根据直播间地址获取roomid等字段
         let roomJson: LiveInfoImp
@@ -1360,6 +1537,265 @@ const doStartListen = async (
     }
 }
 
+// ---------- TikTok 采集 ----------
+// 当前窗口的 label：采集事件按窗口区分
+const windowLabel = (() => {
+    try {
+        return getCurrent().label
+    } catch {
+        return 'main'
+    }
+})()
+// 当前采集会话号：0 表示没有采集，-1 表示正在启动
+let tiktokSession = 0
+// 启动期间先收到的事件，拿到会话号后再处理
+let tiktokPendingEvents: Array<{ session: number; event: any }> = []
+// 当前采集的 TikTok 地址
+let tiktokUrl = ''
+// 采集是否已经由脚本给出了结束原因(直播结束/没开播/出错)
+let tiktokEnded = false
+let unlistenTikTok: (() => void) | null = null
+
+onMounted(async () => {
+    try {
+        unlistenTikTok = await listen<{
+            window: string
+            session: number
+            events: any[]
+        }>('tiktok-event', (e) => {
+            const { window: label, session, events } = e.payload
+            if (label !== windowLabel) return
+            if (tiktokSession === -1) {
+                events.forEach((event) => tiktokPendingEvents.push({ session, event }))
+                return
+            }
+            if (session !== tiktokSession) return
+            events.forEach(handleTikTokEvent)
+        })
+    } catch (e) {
+        console.error('listen tiktok-event error:', e)
+    }
+})
+onBeforeUnmount(() => {
+    unlistenTikTok?.()
+})
+
+const stopTikTok = async () => {
+    if (tiktokSession === 0) return
+    tiktokSession = 0
+    tiktokPendingEvents = []
+    try {
+        await invoke('stop_tiktok')
+    } catch (e) {
+        console.error('stop_tiktok error:', e)
+    }
+}
+
+// 正在安装 TikTok 运行环境：防止重复安装
+let tiktokEnvInstalling = false
+
+// 检查 Python 和 TikTokLive，缺少时询问后自动安装，装好后直接继续，不需要重启程序
+const ensureTikTokEnv = async () => {
+    if (tiktokEnvInstalling) {
+        ElMessage.info('正在安装 TikTok 运行环境，请稍候')
+        return false
+    }
+    const python = pythonPath.value.trim() || null
+    const proxy = tiktokProxy.value.trim() || null
+    type Env = { python: boolean; pythonError: string | null; installed: boolean }
+    let env: Env
+    try {
+        env = await invoke<Env>('check_tiktok_env', { python })
+    } catch (e) {
+        ElMessage.error(String(e))
+        return false
+    }
+    if (env.installed) return true
+    // 设置里填了 Python 路径但不可用：让用户自己处理，不自动安装
+    if (!env.python && python) {
+        ElMessageBox.alert(env.pythonError || 'Python 不可用', 'Python 不可用', {
+            confirmButtonText: '知道了',
+        })
+        return false
+    }
+    const needPython = !env.python
+    try {
+        await ElMessageBox.confirm(
+            needPython
+                ? 'TikTok 采集需要 Python 运行环境，电脑上没有找到。是否自动安装 Python 3.12(约 26MB，只为当前用户安装，不需要管理员权限)和 TikTokLive 组件？'
+                : 'TikTok 采集需要安装 TikTokLive 组件(大约需要一分钟)。会为本程序单独创建 Python 环境，不影响电脑上已有的 Python。现在安装吗？',
+            needPython ? '安装 Python' : '安装 TikTok 组件',
+            { confirmButtonText: '安装', cancelButtonText: '取消' },
+        )
+    } catch {
+        return false
+    }
+    tiktokEnvInstalling = true
+    // 安装进度：文字跟随进度事件更新
+    const progressText = ref(needPython ? '正在下载 Python...' : '正在安装 TikTokLive 组件...')
+    const loading = ElMessage({
+        message: () => h('span', progressText.value),
+        duration: 0,
+        type: 'info',
+    })
+    let unlistenProgress: (() => void) | null = null
+    try {
+        if (needPython) {
+            unlistenProgress = await getCurrent().listen<{
+                stage: string
+                percent: number | null
+            }>('python-install-progress', (e) => {
+                const { stage, percent } = e.payload
+                if (stage === 'download') {
+                    progressText.value = `正在下载 Python... ${percent ?? 0}%`
+                } else if (stage === 'install') {
+                    progressText.value = '正在安装 Python，请稍候(约 1 分钟)...'
+                }
+            })
+            await invoke('install_python', { proxy })
+        }
+        progressText.value = '正在安装 TikTokLive 组件...'
+        await invoke('install_tiktok_env', { python, proxy })
+        ElMessage.success(
+            needPython ? 'Python 和 TikTokLive 组件安装完成' : 'TikTokLive 组件安装完成',
+        )
+        return true
+    } catch (e) {
+        ElMessageBox.alert(String(e), '安装失败', { confirmButtonText: '知道了' })
+        return false
+    } finally {
+        unlistenProgress?.()
+        loading.close()
+        tiktokEnvInstalling = false
+    }
+}
+
+const startTikTok = async (url: string) => {
+    collectPlatform.value = 'tiktok'
+    if (!(await ensureTikTokEnv())) return
+    collecting = true
+    tiktokUrl = url
+    tiktokEnded = false
+    const uniqueId = url.match(/@([^/?#\s]+)/)?.[1] || url
+    liveInfo.value = {
+        ...liveInfo.value,
+        uid: uniqueId,
+        status: 1,
+        title: 'TikTok',
+        name: '@' + uniqueId.replace(/^@/, ''),
+        roomId: '',
+        avatar: Logo,
+        fans: 0,
+        customer: 0,
+        totalLike: 0,
+    }
+    socketStatus.value = 'connecting'
+    tiktokSession = -1
+    tiktokPendingEvents = []
+    try {
+        const session = await invoke<number>('start_tiktok', {
+            uniqueId: url,
+            proxy: tiktokProxy.value.trim() || null,
+            python: pythonPath.value.trim() || null,
+        })
+        // 启动期间被停止了
+        if (tiktokSession !== -1) return
+        tiktokSession = session
+        const pending = tiktokPendingEvents.filter((p) => p.session === session)
+        tiktokPendingEvents = []
+        pending.forEach((p) => handleTikTokEvent(p.event))
+    } catch (e) {
+        tiktokSession = 0
+        socketStatus.value = 'closed'
+        ElMessage.error(String(e))
+    }
+}
+
+// 处理采集脚本发来的事件：数据结构和抖音一致
+const handleTikTokEvent = (ev: any) => {
+    switch (ev.event) {
+        case 'status':
+            socketStatus.value =
+                ev.status === 'connected'
+                    ? 'connected'
+                    : ev.status === 'reconnecting'
+                      ? 'reconnecting'
+                      : 'connecting'
+            break
+        case 'room':
+            setRoomLive(tiktokUrl, true)
+            liveInfo.value = {
+                ...liveInfo.value,
+                status: 2,
+                roomId: ev.roomId || liveInfo.value.roomId,
+                title: ev.title || liveInfo.value.title,
+                name: ev.nickName || liveInfo.value.name,
+                avatar: ev.avatar || liveInfo.value.avatar,
+                customer: ev.userCount || liveInfo.value.customer,
+                totalLike: ev.likeCount || liveInfo.value.totalLike,
+                fans: ev.followerCount || liveInfo.value.fans,
+            }
+            if (ev.videoUrl && !dplayer) loadLive(ev.videoUrl)
+            break
+        case 'chat':
+            onChat('tiktok', ev.id, ev.user, ev.content)
+            break
+        case 'gift':
+            onGift('tiktok', {
+                id: ev.id,
+                user: ev.user,
+                gift: ev.gift,
+                giftId: ev.giftId,
+                total: ev.repeatCount,
+                repeatEnd: ev.repeatEnd,
+                groupId: ev.groupId,
+            })
+            break
+        case 'like':
+            onLike('tiktok', ev.id, ev.user, ev.count, ev.total)
+            break
+        case 'join':
+            onJoin('tiktok', ev.id, ev.user)
+            break
+        case 'follow':
+            onFollow('tiktok', ev.id, ev.user, ev.followCount)
+            break
+        case 'stats':
+            liveInfo.value = { ...liveInfo.value, customer: ev.viewers }
+            break
+        case 'offline':
+            tiktokEnded = true
+            setRoomLive(tiktokUrl, false)
+            liveInfo.value = { ...liveInfo.value, status: 4 }
+            ElMessage.warning('主播当前没有在直播')
+            break
+        case 'live_end':
+            tiktokEnded = true
+            setRoomLive(tiktokUrl, false)
+            liveInfo.value = { ...liveInfo.value, status: 4 }
+            ElMessage.warning('直播已结束，停止采集')
+            break
+        case 'error':
+            console.warn('[tiktok]', ev.message)
+            if (ev.fatal) {
+                tiktokEnded = true
+                setRoomLive(tiktokUrl, false)
+                ElMessage.error(ev.message)
+            } else if (ev.code === 'rate_limit') {
+                ElMessage.warning(ev.message)
+            }
+            break
+        case 'exit':
+            tiktokSession = 0
+            socketStatus.value = 'closed'
+            if (!tiktokEnded) ElMessage.error('TikTok 采集进程意外退出')
+            break
+        case 'log':
+            console.log('[tiktok]', ev.message)
+            break
+    }
+}
+
 // 选择 Node.js 项目目录
 const selectProjectPath = async () => {
     const selected = await open({
@@ -1387,14 +1823,22 @@ const selectExePath = async () => {
 }
 
 // 清空直播和聊天内容
-const clearLivex = async () => {
-    try {
-        await invoke('stop_external_processes')
-    } catch (error) {
-        console.error('stop_external_processes error:', error)
+// 清空直播和消息。stopExe 为 true 时同时关闭 exe(点「停止」时)；开始采集时传 false，exe 保持运行
+const clearLivex = async (stopExe = true) => {
+    // 先停止推送：之后到达的消息不再发给后台，队列里没发出去的和重试中的全部取消
+    collecting = false
+    resetPushers()
+    if (stopExe) {
+        try {
+            await invoke('stop_external_processes')
+        } catch (error) {
+            console.error('stop_external_processes error:', error)
+        }
     }
     // console.log('清空')
-    dplayer?.destroy()
+    destroyPlayer()
+    msgStickBottom.value = true
+    unreadMsgCount.value = 0
     messageList.value = [
         {
             id: '1',
@@ -1405,6 +1849,9 @@ const clearLivex = async () => {
     ]
     socketClient?.disconnect()
     socketClient = null
+    await stopTikTok()
+    socketStatus.value = 'closed'
+    diamond.value = 0
     // 重置去重状态
     seenMsgIds = new Set()
     seenMsgIdsOld = new Set()
@@ -1558,30 +2005,121 @@ const destroyPlayer = () => {
 // 消息列表最大长度：超过后裁剪掉旧消息，避免长时间采集后列表无限增长导致界面卡死
 const MAX_MESSAGE_COUNT = 600
 const KEEP_MESSAGE_COUNT = 300
+// 用户往上翻看时，为了不让正在看的内容跳动，先不裁剪，超过这个数才强制裁剪
+const HARD_MAX_MESSAGE_COUNT = 3000
 // 消息列表添加消息：长列表优化
+// 裁剪时额外保留的旧礼物条数：礼物比弹幕少得多，筛选「礼物」时不至于被弹幕挤掉
+const KEEP_GIFT_COUNT = 300
 const pushMsg = (msg: any) => {
     messageList.value.push(msg)
-    if (messageList.value.length > MAX_MESSAGE_COUNT) {
-        messageList.value.splice(
-            0,
-            messageList.value.length - KEEP_MESSAGE_COUNT,
-        )
+    const length = messageList.value.length
+    if (
+        (msgStickBottom.value && length > MAX_MESSAGE_COUNT) ||
+        length > HARD_MAX_MESSAGE_COUNT
+    ) {
+        const list = messageList.value
+        const cut = length - KEEP_MESSAGE_COUNT
+        const oldGifts = list
+            .slice(0, cut)
+            .filter((m) => m.type === 'gift')
+            .slice(-KEEP_GIFT_COUNT)
+        messageList.value = oldGifts.concat(list.slice(cut))
     }
-    scrollToBottom()
+    if (msgStickBottom.value) {
+        scrollToBottom()
+    } else if (msgMatches(msg)) {
+        unreadMsgCount.value++
+    }
 }
 
-// 滚动盒子到底部：一帧内只滚动一次
-let scrollPending = false
-const scrollToBottom = () => {
-    if (scrollPending) return
-    scrollPending = true
-    requestAnimationFrame(() => {
-        scrollPending = false
-        const msgDom: HTMLElement | null = document.getElementById('liveMsg')
-        if (msgDom) {
-            msgDom.scrollTop = msgDom.scrollHeight
-        }
-    })
+// 消息筛选：选中的类型为空表示显示全部，选择会记住
+type MsgKind = 'chat' | 'gift' | 'like' | 'join' | 'follow'
+const MSG_FILTERS: { key: MsgKind; label: string }[] = [
+    { key: 'chat', label: '弹幕' },
+    { key: 'gift', label: '礼物' },
+    { key: 'like', label: '点赞' },
+    { key: 'join', label: '进场' },
+    { key: 'follow', label: '关注' },
+]
+const loadMsgFilter = (): MsgKind[] => {
+    try {
+        const saved = JSON.parse(localStorage.getItem('msg_filter') || '[]')
+        const keys = MSG_FILTERS.map((f) => f.key)
+        return Array.isArray(saved)
+            ? saved.filter((k: any) => keys.includes(k))
+            : []
+    } catch {
+        return []
+    }
+}
+const msgFilter = ref<MsgKind[]>(loadMsgFilter())
+const msgMatches = (msg: any) =>
+    !msgFilter.value.length || msgFilter.value.includes(msg.type)
+const visibleMessages = computed(() =>
+    msgFilter.value.length
+        ? messageList.value.filter(msgMatches)
+        : messageList.value,
+)
+// 点「全部」清空筛选；点某个类型则切换选中，全部取消后回到「全部」
+const toggleMsgFilter = (key: MsgKind | null) => {
+    if (key === null) {
+        msgFilter.value = []
+    } else if (msgFilter.value.includes(key)) {
+        msgFilter.value = msgFilter.value.filter((k) => k !== key)
+    } else {
+        msgFilter.value = [...msgFilter.value, key]
+    }
+    localStorage.setItem('msg_filter', JSON.stringify(msgFilter.value))
+    // 换了筛选后列表内容整体变化，直接回到最新
+    nextTick(() => scrollToBottom(true))
+}
+
+// 是否自动滚动到底部：用户往上翻看时暂停，手动滚回底部后恢复
+const msgStickBottom = ref(true)
+// 翻看期间新来的消息数
+const unreadMsgCount = ref(0)
+// 最近一次用户操作列表(滚轮、触摸、键盘)的时间，以及是否按住了鼠标(拖动滚动条)。
+// 新消息加入、列表测量高度、裁剪旧消息时也会触发滚动事件，这些不能算作用户在翻看
+let msgUserActionAt = 0
+let msgPointerDown = false
+const markMsgUserAction = () => {
+    msgUserActionAt = Date.now()
+}
+const onMsgPointerDown = () => {
+    msgPointerDown = true
+    markMsgUserAction()
+    window.addEventListener(
+        'pointerup',
+        () => {
+            msgPointerDown = false
+            markMsgUserAction()
+        },
+        { once: true },
+    )
+}
+const onMsgScroll = (e: Event) => {
+    const el = e.target as HTMLElement
+    if (el?.id !== 'liveMsg') return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    if (atBottom) {
+        // 回到底部：恢复自动跟随
+        msgStickBottom.value = true
+        unreadMsgCount.value = 0
+    } else if (msgPointerDown || Date.now() - msgUserActionAt < 800) {
+        // 用户主动往上翻：停止自动跟随
+        msgStickBottom.value = false
+    }
+}
+
+// 滚动到底部；force 为 true 时不管当前是否在翻看。
+// 用虚拟列表自带的方法：新消息渲染后才测量出实际高度，它会等测量完成再滚到真正的底部
+const scrollToBottom = (force = false) => {
+    if (force) {
+        msgStickBottom.value = true
+        unreadMsgCount.value = 0
+    }
+    if (!msgStickBottom.value) return
+    liveMsg.value?.scrollToBottom?.()
 }
 
 // 消息去重：断线重连、连接切换时服务端可能重复下发同一条消息
@@ -1696,13 +2234,32 @@ const dispatchMessage = (msg: any) => {
 // - 请求失败(后台没启动、超时等)会把这一批放回队列重试，不再直接丢弃
 // - 每批限制条数，请求体过大(413)时自动减小批量
 // - 请求带超时，避免某个请求一直挂起导致后面的消息全部卡住
+// - 停止采集时清空队列、取消重试，停止后不会再有消息发给后台
 const PUSH_TIMEOUT = 10000
+// 是否正在采集：停止后到达的消息不再推送给后台
+let collecting = false
+// 所有推送队列的清空方法
+const pusherResets: Array<() => void> = []
+const resetPushers = () => pusherResets.forEach((reset) => reset())
+
 const createPusher = (batchType: string, maxBuffer: number) => {
     let buffer: any[] = []
     let sending = false
     let retryTimer: any = null
     let failCount = 0
     let batchSize = 50
+    // 队列代数：清空后加一，清空前发出的请求结束时不再放回队列、不再继续发送
+    let generation = 0
+
+    pusherResets.push(() => {
+        generation++
+        buffer = []
+        clearTimeout(retryTimer)
+        retryTimer = null
+        failCount = 0
+        // 正在进行的请求无法撤回，结束后按代数判断，不会再触发后续发送
+        sending = false
+    })
 
     const flush = () => {
         if (sending || retryTimer || buffer.length === 0) return
@@ -1711,6 +2268,7 @@ const createPusher = (batchType: string, maxBuffer: number) => {
             return
         }
         sending = true
+        const gen = generation
         const batch = buffer.splice(0, batchSize)
         const url = pushUrl.value + '/' + roomId.value
         const body = { type: batchType, items: batch }
@@ -1718,9 +2276,11 @@ const createPusher = (batchType: string, maxBuffer: number) => {
         axios
             .post(url, body, { timeout: PUSH_TIMEOUT })
             .then(() => {
-                failCount = 0
+                if (gen === generation) failCount = 0
             })
             .catch((err) => {
+                // 队列已经被清空(停止采集)：失败的这一批直接丢弃
+                if (gen !== generation) return
                 const status = err?.response?.status
                 if (status === 413 && batch.length > 1) {
                     // 请求体过大：减小批量后重发
@@ -1737,6 +2297,8 @@ const createPusher = (batchType: string, maxBuffer: number) => {
                 }
             })
             .finally(() => {
+                // 队列已经被清空：不改动新一轮的状态，也不继续发送
+                if (gen !== generation) return
                 sending = false
                 if (retryDelay > 0) {
                     retryTimer = setTimeout(() => {
@@ -1750,6 +2312,7 @@ const createPusher = (batchType: string, maxBuffer: number) => {
     }
 
     return (item: any) => {
+        if (!collecting) return
         buffer.push(item)
         // 后台长时间不可用时限制积压数量，丢弃最旧的
         if (buffer.length > maxBuffer) {
@@ -1763,33 +2326,37 @@ const pushChat = createPusher('chat_batch', 5000)
 const pushGift = createPusher('gift_batch', 20000)
 const pushLike = createPusher('like_batch', 5000)
 
-// 解析弹幕消息
-const decodeChat = (data) => {
-    // 校验消息
-    const chatMsg = douyin.ChatMessage.decode(data)
-    // console.log('chatMsg-----', chatMsg)
-    const { common, user, content } = chatMsg
-    if (isDuplicate(common.msgId.toString())) return
+// 礼物图标
+const giftIconHtml = (icon: string) =>
+    icon && /^https?:\/\//.test(icon)
+        ? `<img src="${escapeHtml(icon)}" style="width: 20px; margin-top:-0.2em"/>`
+        : ''
+
+// 聊天：抖音和 TikTok 共用
+const onChat = (platform: Platform, id: string, user: any, content: string) => {
+    if (isDuplicate(id)) return
     const message = {
-        id: common.msgId.toString(),
+        id,
         type: 'chat',
-        name: user.nickName,
+        name: user?.nickName,
         user: rawUser(user),
-        msg: content,
-    }
-    const postData = {
-        id: common.msgId.toString(),
-        type: 'chat',
-        user: user,
-        content: content,
+        platform,
+        msg: escapeHtml(content),
     }
     checkList.value.includes('chat') && pushMsg(message)
-    if (pushUrl.value == "") return;
-    pushChat(postData)
+    if (pushUrl.value == '') return
+    pushChat({ id, type: 'chat', platform, user, content })
 }
-// 礼物连击记录：key 为 用户_礼物_连击组，value 为已经统计过的数量
-// 抖音连击礼物每次下发的 repeatCount 是累计值，连击结束时还会再发一条 repeatEnd=1 的消息(数量和上一条相同)，
-// 直接按条推送会重复，所以这里只推送相对上一条的增量
+
+// 解析弹幕消息
+const decodeChat = (data) => {
+    const { common, user, content } = douyin.ChatMessage.decode(data)
+    onChat('douyin', common.msgId.toString(), user, content)
+}
+
+// 礼物连击记录：key 为 平台_用户_礼物_连击组，value 为已经统计过的数量
+// 连击礼物每次下发的 repeatCount 是累计值，连击结束时还会再发一条 repeatEnd=1 的消息(数量和上一条相同)，
+// 直接按条推送会重复，所以这里只推送相对上一条的增量。抖音和 TikTok 规则相同
 const giftComboMap = new Map<string, { count: number; at: number }>()
 const GIFT_COMBO_TTL = 10 * 60 * 1000
 const pruneGiftCombo = () => {
@@ -1800,22 +2367,30 @@ const pruneGiftCombo = () => {
     })
 }
 
-// 解析礼物消息
-const decodeGift = (data) => {
-    const giftMsg = douyin.GiftMessage.decode(data)
-    const { common, user, gift, repeatCount } = giftMsg
-    const msgId = common.msgId.toString()
-    if (isDuplicate(msgId)) return
-    recordGiftKind((gift?.id ?? giftMsg.giftId).toString(), gift)
-    // 本条消息里的累计数量
-    const total = parseInt(repeatCount.toString()) || 1
+// 礼物：抖音和 TikTok 共用
+const onGift = (
+    platform: Platform,
+    data: {
+        id: string
+        user: any
+        gift: any
+        giftId: string
+        // 本条消息里的累计数量
+        total: number
+        repeatEnd: number
+        groupId: string
+    },
+) => {
+    const { id, user, gift, giftId, repeatEnd, groupId } = data
+    if (isDuplicate(id)) return
+    recordGiftKind(platform, giftId, gift)
+    const total = data.total || 1
     // 本次实际新增的数量
     let count = total
-    const groupId = giftMsg.groupId.toString()
-    if (groupId !== '0') {
-        const key = `${user?.id}_${giftMsg.giftId}_${groupId}`
+    if (groupId && groupId !== '0') {
+        const key = `${platform}_${user?.id}_${giftId}_${groupId}`
         const prev = giftComboMap.get(key)?.count || 0
-        if (gift?.combo || giftMsg.repeatEnd === 1) {
+        if (gift?.combo || repeatEnd === 1) {
             count = total - prev
         }
         giftComboMap.set(key, { count: Math.max(total, prev), at: Date.now() })
@@ -1826,91 +2401,135 @@ const decodeGift = (data) => {
     const diamondCount = gift?.diamondCount || 0
     const icon = gift?.icon?.urlListList?.[0] || ''
     const message = {
-        id: msgId,
+        id,
         type: 'gift',
         name: user?.nickName,
         user: rawUser(user),
-        msg: `送出 <image src="${icon}" style="width: 20px; margin-top:-0.2em"/> ${gift?.name} x${count}个 (${diamondCount}钻)`,
+        platform,
+        msg: `送出 ${giftIconHtml(icon)} ${escapeHtml(gift?.name)} x${count}个 (${diamondCount}钻)`,
     }
     checkList.value.includes('gift') && pushMsg(message)
     // 计算主播收益
     diamond.value = diamond.value + diamondCount * count
-    const postData = {
-        id: msgId,
+    if (pushUrl.value == '') return
+    pushGift({
+        id,
         type: 'gift',
-        user: user,
-        gift: gift,
+        platform,
+        user,
+        gift,
         // 本次新增数量
         repeatCount: count,
         // 连击累计数量
         totalCount: total,
+        repeatEnd,
+    })
+}
+
+// 解析礼物消息
+const decodeGift = (data) => {
+    const giftMsg = douyin.GiftMessage.decode(data)
+    const { common, user, gift, repeatCount } = giftMsg
+    onGift('douyin', {
+        id: common.msgId.toString(),
+        user,
+        gift,
+        giftId: (gift?.id ?? giftMsg.giftId).toString(),
+        total: parseInt(repeatCount.toString()) || 1,
         repeatEnd: giftMsg.repeatEnd,
+        groupId: giftMsg.groupId.toString(),
+    })
+}
+
+// 进入直播间：抖音和 TikTok 共用
+const onJoin = (platform: Platform, id: string, user: any) => {
+    if (isDuplicate(id)) return
+    checkList.value.includes('comein') &&
+        pushMsg({
+            id,
+            type: 'join',
+            name: user?.nickName,
+            user: rawUser(user),
+            platform,
+            msg: '来了',
+        })
+}
+
+// 点赞：抖音和 TikTok 共用
+const onLike = (
+    platform: Platform,
+    id: string,
+    user: any,
+    count: number,
+    total: number,
+) => {
+    if (isDuplicate(id)) return
+    liveInfo.value = { ...liveInfo.value, totalLike: total }
+    if (checkList.value.includes('like')) {
+        // 同一个人连续点赞只显示一条，数量往上加；中间有别的消息就重新开始一条
+        // 只影响列表显示，推送给后台的数据不合并
+        const likes = Math.max(1, Number(count) || 1)
+        const likeKey = `${platform}_${user?.id?.toString() ?? user?.nickName}`
+        const list = messageList.value
+        const last = list[list.length - 1]
+        if (last && last.type === 'like' && last.likeKey === likeKey) {
+            last.likeCount += likes
+            last.msg = `为主播点赞了 x ${last.likeCount}`
+            scrollToBottom()
+        } else {
+            pushMsg({
+                id,
+                type: 'like',
+                name: user?.nickName,
+                user: rawUser(user),
+                platform,
+                likeKey,
+                likeCount: likes,
+                msg: `为主播点赞了 x ${likes}`,
+            })
+        }
     }
-    if (pushUrl.value == "") return;
-    pushGift(postData)
+    if (pushUrl.value == '') return
+    pushLike({ id, type: 'like', platform, user, like: count })
+}
+
+// 关注：抖音和 TikTok 共用
+const onFollow = (platform: Platform, id: string, user: any, followCount: number) => {
+    if (isDuplicate(id)) return
+    if (followCount) liveInfo.value = { ...liveInfo.value, fans: followCount }
+    checkList.value.includes('follow') &&
+        pushMsg({
+            id,
+            type: 'follow',
+            name: user?.nickName,
+            user: rawUser(user),
+            platform,
+            msg: '关注了主播',
+        })
 }
 
 // 进入房间
 const enterLive = (data) => {
-    const enteryMsg = douyin.MemberMessage.decode(data)
-    const { common, user } = enteryMsg
-    if (isDuplicate(common.msgId.toString())) return
-    const message = {
-        id: common.msgId.toString(),
-        type: 'join',
-        name: user.nickName,
-        user: rawUser(user),
-        msg: '来了',
-    }
-    checkList.value.includes('comein') && pushMsg(message)
-    // console.log('enterLive---', enteryMsg)
+    const { common, user } = douyin.MemberMessage.decode(data)
+    onJoin('douyin', common.msgId.toString(), user)
 }
 
 // 点赞消息
 const likeLive = (data) => {
-    const likeMsg = douyin.LikeMessage.decode(data)
-    // console.log('likeMsg---', likeMsg)
-    const { common, user, total, count } = likeMsg
-    if (isDuplicate(common.msgId.toString())) return
-    const message = {
-        id: common.msgId.toString(),
-        type: 'like',
-        name: user.nickName,
-        user: rawUser(user),
-        msg: `为主播点赞了`,
-    }
-    liveInfo.value = {
-        ...liveInfo.value,
-        totalLike: total,
-    }
-    checkList.value.includes('like') && pushMsg(message)
-    const postData = {
-        id: common.msgId.toString(),
-        type: 'like',
-        user: user,
-        like: parseInt(count.toString()),
-    }
-    if (pushUrl.value == "") return;
-    pushLike(postData)
+    const { common, user, total, count } = douyin.LikeMessage.decode(data)
+    onLike(
+        'douyin',
+        common.msgId.toString(),
+        user,
+        parseInt(count.toString()),
+        total as any,
+    )
 }
 
 // 关注主播
 const followLive = (data) => {
-    const followMsg = douyin.SocialMessage.decode(data)
-    const { common, user, followCount } = followMsg
-    if (isDuplicate(common.msgId.toString())) return
-    const message = {
-        id: common.msgId.toString(),
-        type: 'follow',
-        name: user.nickName,
-        user: rawUser(user),
-        msg: `关注了主播`,
-    }
-    liveInfo.value = {
-        ...liveInfo.value,
-        fans: followCount,
-    }
-    checkList.value.includes('follow') && pushMsg(message)
+    const { common, user, followCount } = douyin.SocialMessage.decode(data)
+    onFollow('douyin', common.msgId.toString(), user, followCount as any)
 }
 
 // 直播间统计
@@ -1957,6 +2576,9 @@ html:root {
     --c-ok: #16a34a;
     --c-warn: #c2710c;
     --c-err: #dc2626;
+    --c-gift: #b45309;
+    --c-gift-bg: #fff4e0;
+    --c-gift-bar: #f59e0b;
 
     color: var(--c-text);
     background-color: var(--c-bg);
@@ -1977,6 +2599,9 @@ html.dark:root {
     --c-ok: #4ade80;
     --c-warn: #fbbf24;
     --c-err: #f87171;
+    --c-gift: #fbbf24;
+    --c-gift-bg: rgba(245, 158, 11, 0.12);
+    --c-gift-bar: #f59e0b;
 
     color-scheme: dark;
 }
@@ -2097,7 +2722,8 @@ html .el-dialog {
             }
         }
 
-        &.reconnecting {
+        &.reconnecting,
+        &.connecting {
             border-color: #d97706;
             background-color: #d97706;
 
@@ -2284,7 +2910,8 @@ html .el-dialog {
                 }
             }
 
-            &.reconnecting {
+            &.reconnecting,
+            &.connecting {
                 color: var(--c-warn);
 
                 .dot {
@@ -2425,10 +3052,87 @@ html .el-dialog {
 }
 
 .chat {
+    position: relative;
     min-height: 0;
     display: flex;
     flex-direction: column;
     border-left: 1px solid var(--c-border);
+
+    // 回到最新消息
+    .toLatest {
+        position: absolute;
+        left: 50%;
+        bottom: 12px;
+        z-index: 10;
+        height: 28px;
+        padding: 0 12px;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        transform: translateX(-50%);
+        border: none;
+        border-radius: 14px;
+        background-color: var(--c-accent);
+        color: var(--c-accent-text);
+        font-size: 12px;
+        white-space: nowrap;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+
+        &:hover {
+            background-color: var(--c-accent-hover);
+        }
+    }
+
+    // 消息筛选
+    .msgFilter {
+        flex-shrink: 0;
+        padding: 6px 10px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        border-bottom: 1px solid var(--c-border);
+        user-select: none;
+
+        .chip {
+            height: 22px;
+            padding: 0 9px;
+            border: 1px solid var(--c-border);
+            border-radius: 11px;
+            background: transparent;
+            color: var(--c-text-2);
+            font-size: 12px;
+            line-height: 20px;
+            cursor: pointer;
+
+            &:hover {
+                background-color: var(--c-hover);
+                color: var(--c-text);
+            }
+
+            &.active {
+                border-color: var(--c-accent);
+                background-color: var(--c-accent);
+                color: var(--c-accent-text);
+            }
+
+            // 礼物选中时沿用礼物的琥珀色
+            &.gift.active {
+                border-color: var(--c-gift-bar);
+                background-color: var(--c-gift-bar);
+                color: #ffffff;
+            }
+        }
+    }
+
+    .chatEmpty {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--c-text-3);
+        font-size: 12px;
+    }
 
     .chatList {
         flex: 1;
@@ -2462,14 +3166,21 @@ html .el-dialog {
             color: var(--c-text);
         }
 
-        // 礼物：整行用强调色块突出
+        // 礼物：整行用独立的琥珀色突出
         &.gift {
             margin: 2px 8px;
-            padding: 4px 6px;
+            padding: 4px 6px 4px 8px;
             border-radius: 6px;
-            background-color: var(--c-soft);
+            border-left: 3px solid var(--c-gift-bar);
+            background-color: var(--c-gift-bg);
+
+            .msgName {
+                color: var(--c-gift);
+                opacity: 0.8;
+            }
 
             .msgText {
+                color: var(--c-gift);
                 font-weight: 600;
             }
         }
@@ -2547,6 +3258,68 @@ html .el-dialog {
     .footerVersion {
         margin-left: auto;
         font-variant-numeric: tabular-nums;
+    }
+}
+
+// ---------- 平台图标 ----------
+// 抖音：实心；TikTok：描边。黑白主题下也能区分
+.platformIcon {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--c-text);
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    user-select: none;
+
+    &.douyin {
+        background-color: var(--c-text);
+        color: var(--c-bg);
+    }
+
+    &.tiktok {
+        background-color: transparent;
+        color: var(--c-text);
+    }
+}
+
+.platformTabs {
+    display: flex;
+    gap: 6px;
+
+    .platformTab {
+        height: 30px;
+        padding: 0 10px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid var(--c-border);
+        border-radius: 6px;
+        color: var(--c-text-2);
+        font-size: 13px;
+        cursor: pointer;
+        user-select: none;
+
+        &:hover {
+            background-color: var(--c-hover);
+        }
+
+        &.active {
+            border-color: var(--c-accent);
+            color: var(--c-text);
+            font-weight: 600;
+        }
+
+        .platformCount {
+            color: var(--c-text-3);
+            font-size: 11px;
+            font-weight: 400;
+        }
     }
 }
 
