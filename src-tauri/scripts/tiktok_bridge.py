@@ -185,6 +185,10 @@ def room_json(info: dict) -> dict:
         "likeCount": stats.get("like_count") or 0,
         "followerCount": (owner.get("follow_info") or {}).get("follower_count") or 0,
         "videoUrl": video,
+        # 完整的拉流信息：界面从里面整理出可选的清晰度
+        "streamUrl": stream,
+        # 开播时间(秒)：start_time 经常是 0，这时用 create_time
+        "startTime": info.get("start_time") or info.get("create_time") or 0,
     }
 
 

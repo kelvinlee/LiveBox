@@ -1,0 +1,319 @@
+// 全局样式：主题变量、Element Plus 覆盖、多个组件共用的按钮和面板样式
+// 弹窗、下拉菜单挂在 body 下，所以主题变量必须是全局的
+
+html:root {
+    // 浅色
+    --c-bg: #ffffff;
+    --c-soft: #f4f4f4;
+    --c-hover: #ebebeb;
+    --c-border: #e4e4e4;
+    --c-text: #0a0a0a;
+    --c-text-2: #5c5c5c;
+    --c-text-3: #9a9a9a;
+    // 强调色：浅色下是黑，深色下是白
+    --c-accent: #0a0a0a;
+    --c-accent-hover: #333333;
+    --c-accent-text: #ffffff;
+    --c-ok: #16a34a;
+    --c-warn: #c2710c;
+    --c-err: #dc2626;
+    --c-gift: #b45309;
+    --c-gift-bg: #fff4e0;
+    --c-gift-bar: #f59e0b;
+
+    color: var(--c-text);
+    background-color: var(--c-bg);
+    color-scheme: light;
+}
+
+html.dark:root {
+    --c-bg: #0a0a0a;
+    --c-soft: #171717;
+    --c-hover: #232323;
+    --c-border: #262626;
+    --c-text: #f2f2f2;
+    --c-text-2: #a3a3a3;
+    --c-text-3: #6b6b6b;
+    --c-accent: #f2f2f2;
+    --c-accent-hover: #cfcfcf;
+    --c-accent-text: #0a0a0a;
+    --c-ok: #4ade80;
+    --c-warn: #fbbf24;
+    --c-err: #f87171;
+    --c-gift: #fbbf24;
+    --c-gift-bg: rgba(245, 158, 11, 0.12);
+    --c-gift-bar: #f59e0b;
+
+    color-scheme: dark;
+}
+
+// Element Plus 跟随主题
+html:root,
+html.dark:root {
+    --el-color-primary: var(--c-accent);
+    --el-color-primary-light-3: var(--c-text-2);
+    --el-color-primary-light-5: var(--c-text-3);
+    --el-color-primary-light-7: var(--c-border);
+    --el-color-primary-light-8: var(--c-border);
+    --el-color-primary-light-9: var(--c-soft);
+    --el-color-primary-dark-2: var(--c-accent-hover);
+    --el-bg-color: var(--c-bg);
+    --el-bg-color-overlay: var(--c-bg);
+    --el-fill-color-blank: var(--c-bg);
+    --el-fill-color-light: var(--c-soft);
+    --el-text-color-primary: var(--c-text);
+    --el-text-color-regular: var(--c-text);
+    --el-text-color-secondary: var(--c-text-2);
+    --el-text-color-placeholder: var(--c-text-3);
+    --el-border-color: var(--c-border);
+    --el-border-color-light: var(--c-border);
+    --el-border-color-lighter: var(--c-border);
+    --el-border-color-hover: var(--c-text-3);
+    --el-border-radius-base: 6px;
+    --el-box-shadow-light: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+// 加 html 前缀提高优先级：Element Plus 的样式在本文件之后加载
+html .el-button--primary {
+    --el-button-text-color: var(--c-accent-text);
+    --el-button-hover-text-color: var(--c-accent-text);
+    --el-button-active-text-color: var(--c-accent-text);
+    --el-button-hover-bg-color: var(--c-accent-hover);
+    --el-button-hover-border-color: var(--c-accent-hover);
+    --el-button-active-bg-color: var(--c-accent-hover);
+    --el-button-active-border-color: var(--c-accent-hover);
+}
+
+html .el-checkbox {
+    margin-right: 18px;
+    --el-checkbox-checked-icon-color: var(--c-accent-text);
+}
+
+// 直播间弹出层：去掉默认内边距和阴影
+html .roomPopper.el-popover {
+    padding: 0;
+    border-color: var(--c-border);
+    border-radius: 8px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+}
+
+html .el-message-box {
+    --el-messagebox-border-radius: 10px;
+    border: 1px solid var(--c-border);
+    box-shadow: none;
+}
+
+html .el-dialog {
+    --el-dialog-bg-color: var(--c-bg);
+    --el-dialog-border-radius: 10px;
+    --el-dialog-box-shadow: none;
+    border: 1px solid var(--c-border);
+}
+
+// 采集方式下拉菜单(挂在 body 上，不能用 scoped)
+.startModeItem {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.4;
+    padding: 2px 0;
+
+    b {
+        font-weight: 600;
+    }
+
+    small {
+        color: var(--c-text-3);
+        font-size: 11px;
+    }
+}
+
+// ---------- 多个组件共用 ----------
+@keyframes waitPulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.3;
+    }
+}
+
+.btn {
+    flex-shrink: 0;
+    height: 32px;
+    padding: 0 14px;
+    border: 1px solid var(--c-border);
+    border-radius: 6px;
+    background-color: transparent;
+    color: var(--c-text);
+    font-size: 13px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s;
+
+    &:hover {
+        background-color: var(--c-hover);
+    }
+
+    // 采集按钮：未采集时蓝色，采集中绿色，重连中橙色
+    &.start {
+        min-width: 80px;
+        border-color: #2563eb;
+        background-color: #2563eb;
+        color: #ffffff;
+        font-weight: 600;
+
+        &:hover {
+            border-color: #1d4ed8;
+            background-color: #1d4ed8;
+        }
+
+        &.connected {
+            border-color: #16a34a;
+            background-color: #16a34a;
+
+            &:hover {
+                border-color: #15803d;
+                background-color: #15803d;
+            }
+        }
+
+        &.reconnecting,
+        &.connecting {
+            border-color: #d97706;
+            background-color: #d97706;
+
+            &:hover {
+                border-color: #b45309;
+                background-color: #b45309;
+            }
+        }
+
+        // 持续采集等待开播：紫色
+        &.waiting {
+            border-color: #7c3aed;
+            background-color: #7c3aed;
+
+            &:hover {
+                border-color: #6d28d9;
+                background-color: #6d28d9;
+            }
+        }
+    }
+
+    &.primary {
+        border-color: var(--c-accent);
+        background-color: var(--c-accent);
+        color: var(--c-accent-text);
+
+        &:hover {
+            border-color: var(--c-accent-hover);
+            background-color: var(--c-accent-hover);
+        }
+    }
+}
+
+.iconBtn {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 6px;
+    background-color: transparent;
+    color: var(--c-text-2);
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s;
+
+    &:hover {
+        background-color: var(--c-hover);
+        color: var(--c-text);
+    }
+
+    // 已关闭的开关(如隐藏了直播画面)
+    &.off {
+        color: var(--c-text-3);
+    }
+}
+
+.panelHead {
+    flex-shrink: 0;
+    height: 36px;
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--c-border);
+    user-select: none;
+
+    .panelTitle {
+        font-weight: 600;
+    }
+
+    .panelMeta {
+        margin-left: 8px;
+        color: var(--c-text-3);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .panelActions {
+        margin-left: auto;
+        display: flex;
+        gap: 14px;
+    }
+
+    .textBtn {
+        color: var(--c-text-2);
+        font-size: 12px;
+        cursor: pointer;
+
+        &:hover {
+            color: var(--c-text);
+        }
+
+        &.disabled {
+            color: var(--c-text-3);
+            cursor: default;
+        }
+    }
+}
+
+// ---------- 平台图标 ----------
+// 抖音：实心；TikTok：描边。黑白主题下也能区分
+.platformIcon {
+    flex-shrink: 0;
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--c-text);
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    user-select: none;
+
+    &.douyin {
+        background-color: var(--c-text);
+        color: var(--c-bg);
+    }
+
+    &.tiktok {
+        background-color: transparent;
+        color: var(--c-text);
+    }
+}
+
+// 清晰度菜单里当前选中的一项(菜单挂在 body 下)
+.el-dropdown-menu__item.activeQuality {
+    font-weight: 600;
+    color: var(--c-text);
+
+    &::after {
+        content: '✓';
+        margin-left: 8px;
+    }
+}

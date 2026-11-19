@@ -230,66 +230,6 @@ pub async fn get_live_html(url: &str, cookie: Option<String>) -> Result<LiveInfo
     }
 }
 
-#[tauri::command]
-pub async fn open_window(
-    handle: AppHandle,
-    app_url: String,
-    app_name: String,
-    platform: String,
-    user_agent: String,
-    resize: bool,
-    width: f64,
-    height: f64,
-    _js_content: String,
-) {
-    let window_label = "previewWeb";
-    // if let Some(existing_window) = handle.get_window(window_label) {
-    //     if resize {
-    //         let new_size = LogicalSize::new(width, height);
-    //         match existing_window.set_size(new_size) {
-    //             Ok(_) => println!("Window resized to {}x{}", width, height),
-    //             Err(e) => eprintln!("Failed to resize window: {}", e),
-    //         }
-    //     } else {
-    //         existing_window.close().unwrap();
-    //         println!("Existing window closed.");
-    //         let start = Instant::now();
-    //         while handle.get_window(window_label).is_some() {
-    //             if start.elapsed().as_secs() > 2 {
-    //                 println!("Window close took too long. Aborting.");
-    //                 return;
-    //             }
-    //             std::thread::yield_now();
-    //         }
-    //     }
-    // }
-    println!("Opening docs in external window: {}, {}", app_url, platform);
-    // println!("js_content: {}", js_content);
-    // let resource_path = handle
-    //     .path_resolver()
-    //     .resolve_resource("data/custom.js")
-    //     .expect("failed to resolve resource");
-    // let mut custom_js = std::fs::File::open(&resource_path).unwrap();
-    // let mut contents = String::new();
-    // custom_js.read_to_string(&mut contents).unwrap();
-    // contents += js_content.as_str();
-    // println!("js file contents: {}", contents);
-    if !resize {
-        let _window = tauri::WindowBuilder::new(
-            &handle,
-            window_label, /* the unique window label */
-            tauri::WindowUrl::External(app_url.parse().unwrap()),
-        )
-        .title(app_name.clone())
-        .inner_size(width, height)
-        .user_agent(user_agent.as_str())
-        .initialization_script(include_str!("../inject/websocket.js"))
-        .center()
-        .build()
-        .unwrap();
-    }
-}
-
 static WINDOW_COUNTER: AtomicU32 = AtomicU32::new(1);
 
 #[tauri::command]
@@ -540,6 +480,28 @@ pub async fn get_backend_logs() -> Result<Vec<BackendLog>, String> {
         .lock()
         .map_err(|_| "日志锁获取失败".to_string())?;
     Ok(store.logs.iter().cloned().collect())
+}
+
+/// 后台是否在运行：本程序启动的后台进程还活着，或者推送地址的本机端口在监听
+/// (后台不是本程序启动的，或者应用重启过)。前端据此决定是否推送消息
+#[tauri::command]
+pub async fn backend_running(push_url: Option<String>) -> Result<bool, String> {
+    {
+        let mut guard = npm_process()
+            .lock()
+            .map_err(|_| "npm 进程锁获取失败".to_string())?;
+        if let Some(ref mut child) = *guard {
+            match child.try_wait() {
+                Ok(None) => return Ok(true),
+                // 进程已经退出(崩溃或被结束)
+                _ => *guard = None,
+            }
+        }
+    }
+    Ok(push_url
+        .as_deref()
+        .map(backend_is_listening)
+        .unwrap_or(false))
 }
 
 /// 手动停止后台。返回 true 表示确实停止了一个由本程序启动的后台
