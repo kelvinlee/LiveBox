@@ -3,10 +3,21 @@
         <TopBar />
         <main
             class="main"
-            :class="{ stacked: chatLayout === 'bottom' || videoHidden, noVideo: videoHidden }"
+            :class="{
+                stacked: chatLayout === 'bottom' || videoHidden,
+                noVideo: videoHidden,
+                resizing,
+            }"
+            :style="sizeVars"
         >
             <StagePanel />
             <ChatPanel />
+            <!-- 画面和弹幕之间可以拖动调整大小；隐藏画面时不需要 -->
+            <LayoutSplitter
+                v-if="!videoHidden"
+                :vertical="chatLayout === 'bottom'"
+                @dragging="resizing = $event"
+            />
         </main>
         <!-- 没有勾选「使用后台」时不显示后台日志 -->
         <BackendLogs v-if="useBackend" />
@@ -18,7 +29,7 @@
 
 <script setup lang="ts">
 // 页面只负责组合各个部分；采集、推送、礼物等逻辑在 src/live 下
-import { onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import TopBar from '@/components/TopBar.vue'
 import StagePanel from '@/components/StagePanel.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
@@ -26,6 +37,8 @@ import BackendLogs from '@/components/BackendLogs.vue'
 import AppFooter from '@/components/AppFooter.vue'
 import ResendDialog from '@/components/ResendDialog.vue'
 import SettingsDialog from '@/components/SettingsDialog.vue'
+import LayoutSplitter from '@/components/LayoutSplitter.vue'
+import { CHAT_WIDTH_MIN, STAGE_WIDTH_MIN, chatWidth, videoRatio } from '@/live/layout'
 import { useBackend } from '@/live/settings'
 import { chatLayout, videoHidden } from '@/live/player'
 import { checkDouyinLoginOnce } from '@/live/login'
@@ -35,6 +48,13 @@ import { initTikTokListener } from '@/live/tiktok'
 import { installHotkeys } from '@/live/appWindow'
 
 const cleanups: Array<() => void> = []
+
+// 拖动分隔条时的大小。窗口变窄时弹幕栏不会把画面挤得太小
+const resizing = ref(false)
+const sizeVars = computed(() => ({
+    '--chat-w': `max(${CHAT_WIDTH_MIN}px, min(${chatWidth.value}px, calc(100% - ${STAGE_WIDTH_MIN}px)))`,
+    '--video-h': `${videoRatio.value}%`,
+}))
 
 onMounted(async () => {
     cleanups.push(installHotkeys())
@@ -70,15 +90,21 @@ onBeforeUnmount(() => {
 }
 
 .main {
+    position: relative;
     flex: 1;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr) var(--chat-w);
+
+    // 拖动时不选中文字
+    &.resizing {
+        user-select: none;
+    }
 
     // 弹幕在画面下方：上面画面，下面弹幕
     &.stacked {
         grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: minmax(180px, 48%) minmax(0, 1fr);
+        grid-template-rows: var(--video-h) minmax(0, 1fr);
 
         .chat {
             border-left: none;

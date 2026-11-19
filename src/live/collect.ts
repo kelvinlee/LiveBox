@@ -14,6 +14,7 @@ import {
     saveStartSettings,
     useBackend,
     useExe,
+    waitLiveSeconds,
 } from './settings'
 import {
     clearLiveStart,
@@ -59,7 +60,6 @@ export const startButtonText = computed(() => {
 })
 
 // 持续采集：检查间隔和已检查次数
-export const WAIT_LIVE_INTERVAL = 30_000
 export const waitChecks = ref(0)
 
 // 是否正在启动采集：防止重复点击
@@ -266,7 +266,8 @@ export const waitForLive = async (url: string, token: number) => {
             notified = true
             ElMessage.info('主播还没开播，开播后会自动开始采集')
         }
-        await new Promise((resolve) => setTimeout(resolve, WAIT_LIVE_INTERVAL))
+        // 每次都读设置，等待中改了间隔，下一次就生效
+        await new Promise((resolve) => setTimeout(resolve, (waitLiveSeconds.value || 10) * 1000))
     }
 }
 

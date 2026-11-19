@@ -84,6 +84,16 @@ export const selectExePath = async () => {
     }
 }
 
+// 持续采集：没开播时多少秒检查一次，默认 10 秒。太频繁容易被平台限制，限制在 5~300 秒
+export const WAIT_LIVE_MIN = 5
+export const WAIT_LIVE_MAX = 300
+const clampWait = (v: unknown) => {
+    const n = Math.round(Number(v))
+    return Number.isFinite(n) ? Math.min(WAIT_LIVE_MAX, Math.max(WAIT_LIVE_MIN, n)) : 10
+}
+export const waitLiveSeconds = ref(clampWait(getLocalJson<unknown>('wait_live_seconds', 10)))
+watch(waitLiveSeconds, (v) => localStorage.setItem('wait_live_seconds', String(clampWait(v))))
+
 // ---------- 平台相关 ----------
 // 从登录 WebView 同步的整段抖音 Cookie
 export const douyinCookie = ref(localStorage.getItem('douyinCookie') || '')

@@ -37,6 +37,21 @@
                 <el-checkbox v-model="useExe">使用 exe</el-checkbox>
             </div>
             <div class="formRow">
+                <label>持续采集</label>
+                <span>没开播时每</span>
+                <el-input-number
+                    v-model="waitLiveSeconds"
+                    :min="WAIT_LIVE_MIN"
+                    :max="WAIT_LIVE_MAX"
+                    :step="5"
+                    step-strictly
+                    size="small"
+                    controls-position="right"
+                    class="waitInput"
+                />
+                <span>秒检查一次</span>
+            </div>
+            <div class="formRow">
                 <label>抖音登录</label>
                 <el-button @click="openDouyinLogin">打开登录页</el-button>
                 <el-button type="primary" @click="syncDouyinCookies">
@@ -98,6 +113,9 @@ import {
     tiktokProxy,
     useBackend,
     useExe,
+    WAIT_LIVE_MAX,
+    WAIT_LIVE_MIN,
+    waitLiveSeconds,
 } from '@/live/settings'
 import { openDouyinLogin, syncDouyinCookies } from '@/live/login'
 </script>
@@ -124,6 +142,10 @@ import { openDouyinLogin, syncDouyinCookies } from '@/live/login'
 
         .el-button + .el-button {
             margin-left: 0;
+        }
+
+        .waitInput {
+            width: 96px;
         }
 
         .cookieOk {

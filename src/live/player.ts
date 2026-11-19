@@ -11,8 +11,12 @@ import { parseQualities, pickQuality, savePreferredQuality, type Quality } from 
 const PLAYER_ID = 'dplayer'
 
 let dplayer: DPlayerImp | null = null
-// 当前直播的视频地址：隐藏画面后再显示时用它重新播放
+// flv.js / hls.js 的实例：DPlayer 销毁时不会帮忙关掉，要自己销毁，否则旧的流还在后台下载
+let streamPlayer: { destroy: () => void } | null = null
+// 当前直播的视频地址：隐藏画面后再显示、重新加载时用它重新播放
 let currentVideo: { url: string; live: boolean } | null = null
+// 有没有可以播放的直播(用来显示「重新加载」按钮)
+export const hasVideo = ref(false)
 
 export const hasPlayer = () => dplayer !== null
 
@@ -81,6 +85,7 @@ const createPlayer = (videoUrl: string, live: boolean): DPlayerImp | null => {
                 customType: {
                     customHls: (video: any) => {
                         const hls = new Hls()
+                        streamPlayer = hls
                         hls.loadSource(videoUrl)
                         hls.attachMedia(video)
                     },
@@ -100,6 +105,7 @@ const createPlayer = (videoUrl: string, live: boolean): DPlayerImp | null => {
                 customType: {
                     customFlv: (video: any) => {
                         const flvPlayer = Flv.createPlayer({ type: 'flv', url: videoUrl })
+                        streamPlayer = flvPlayer
                         flvPlayer.attachMediaElement(video)
                         flvPlayer.load()
                     },
@@ -113,6 +119,7 @@ const createPlayer = (videoUrl: string, live: boolean): DPlayerImp | null => {
 // 播放直播；画面隐藏时只记下地址，不播放
 export const loadLive = (videoUrl: string, live = true) => {
     currentVideo = { url: videoUrl, live }
+    hasVideo.value = true
     if (videoHidden.value || dplayer) return
     dplayer = createPlayer(videoUrl, live)
 }
@@ -121,11 +128,28 @@ export const loadLive = (videoUrl: string, live = true) => {
 export const destroyPlayer = (forget = true) => {
     if (forget) {
         currentVideo = null
+        hasVideo.value = false
         qualities.value = []
         currentQuality.value = ''
+    }
+    if (streamPlayer) {
+        try {
+            streamPlayer.destroy()
+        } catch (e) {
+            console.warn('关闭视频流失败:', e)
+        }
+        streamPlayer = null
     }
     if (dplayer) {
         dplayer.destroy()
         dplayer = null
     }
+}
+
+// 重新加载：画面卡住时用同一个地址重新拉流
+export const reloadVideo = () => {
+    const video = currentVideo
+    if (!video || videoHidden.value) return
+    destroyPlayer(false)
+    nextTick(() => loadLive(video.url, video.live))
 }

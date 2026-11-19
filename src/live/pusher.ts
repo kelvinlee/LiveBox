@@ -168,7 +168,8 @@ export const pushChat = createPusher('chat_batch', 5000)
 export const pushGift = createPusher('gift_batch', 20000)
 export const pushLike = createPusher('like_batch', 5000)
 
-// 底栏显示的推送状态。level：idle 未采集 / ok 正常 / warn 需要注意 / error 推送失败
+// 底栏显示的推送状态：文字固定不变(不放会一直变的数字，免得底栏跳动)，具体数字放在鼠标提示里。
+// level：idle 未采集 / ok 正常 / warn 需要注意 / error 推送失败
 export const pushStatus = computed(() => {
     if (!collecting.value) {
         return { level: 'idle', text: '推送未开始', detail: '开始采集后，消息会推送给后台' }
@@ -190,8 +191,10 @@ export const pushStatus = computed(() => {
     if (!backendRunning.value) {
         return {
             level: 'warn',
-            text: `后台没有运行，消息不推送${stats.skipped ? `(已丢弃 ${stats.skipped} 条)` : ''}`,
-            detail: '后台停止或没有启动时，收到的消息直接丢弃。启动或重启后台后会自动恢复推送',
+            text: '后台没有运行，消息不推送',
+            detail:
+                '后台停止或没有启动时，收到的消息直接丢弃。启动或重启后台后会自动恢复推送' +
+                (stats.skipped ? `。已丢弃 ${stats.skipped} 条` : ''),
         }
     }
     const backlog = queues.reduce((sum, q) => sum + q.backlog, 0)
@@ -213,19 +216,23 @@ export const pushStatus = computed(() => {
     if (failing) {
         return {
             level: 'error',
-            text: `推送失败，第 ${failing.failCount} 次重试中${backlog ? `，积压 ${backlog} 条` : ''}`,
-            detail: `${failing.lastError}。${notes}`,
+            text: '推送失败，重试中',
+            detail: `${failing.lastError}。已重试 ${failing.failCount} 次，${notes}`,
         }
     }
     if (backlog > BACKLOG_WARN) {
-        return { level: 'warn', text: `推送积压 ${backlog} 条`, detail: notes }
+        return { level: 'warn', text: '推送积压，后台处理不过来', detail: notes }
     }
     if (extra.length) {
-        return { level: 'warn', text: `推送中，${extra.join('，')}`, detail: notes }
+        return {
+            level: 'warn',
+            text: stats.rejected ? '推送中，有消息被后台拒绝' : '推送中，有消息因积压过多被丢弃',
+            detail: notes,
+        }
     }
     return {
         level: 'ok',
-        text: stats.sent ? `推送正常，已推送 ${stats.sent} 条` : '推送正常',
+        text: '推送正常',
         detail: notes,
     }
 })

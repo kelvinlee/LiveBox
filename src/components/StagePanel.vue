@@ -33,52 +33,50 @@
         <div v-show="!videoHidden" class="player">
             <!-- 视频播放器 -->
             <div id="dplayer" class="dplayer"></div>
-            <!-- 清晰度：右上角，鼠标移到画面上时更明显 -->
-            <el-dropdown
-                v-if="qualities.length"
-                class="qualityPicker"
-                trigger="click"
-                placement="bottom-end"
-                :disabled="qualities.length < 2"
-                @command="switchQuality"
-            >
-                <button
-                    class="qualityBtn"
-                    :title="qualities.length < 2 ? '这场直播只有这一种清晰度' : '切换清晰度'"
-                >
-                    {{ currentQualityName }}
-                    <el-icon v-if="qualities.length > 1" :size="10"><ArrowDown /></el-icon>
+            <!-- 右上角：重新加载、清晰度，鼠标移到画面上时更明显 -->
+            <div v-if="hasVideo" class="playerTools">
+                <button class="toolBtn" title="重新加载画面(卡住不动时用)" @click="reloadVideo">
+                    <el-icon :size="13"><Refresh /></el-icon>
                 </button>
-                <template #dropdown>
-                    <el-dropdown-menu>
-                        <el-dropdown-item
-                            v-for="q in qualities"
-                            :key="q.key"
-                            :command="q.key"
-                            :class="{ activeQuality: q.key === currentQuality }"
-                        >
-                            {{ q.name }}
-                        </el-dropdown-item>
-                    </el-dropdown-menu>
-                </template>
-            </el-dropdown>
+                <el-dropdown
+                    v-if="qualities.length"
+                    trigger="click"
+                    placement="bottom-end"
+                    :disabled="qualities.length < 2"
+                    @command="switchQuality"
+                >
+                    <button
+                        class="toolBtn"
+                        :title="qualities.length < 2 ? '这场直播只有这一种清晰度' : '切换清晰度'"
+                    >
+                        {{ currentQualityName }}
+                        <el-icon v-if="qualities.length > 1" :size="10"><ArrowDown /></el-icon>
+                    </button>
+                    <template #dropdown>
+                        <el-dropdown-menu>
+                            <el-dropdown-item
+                                v-for="q in qualities"
+                                :key="q.key"
+                                :command="q.key"
+                                :class="{ activeQuality: q.key === currentQuality }"
+                            >
+                                {{ q.name }}
+                            </el-dropdown-item>
+                        </el-dropdown-menu>
+                    </template>
+                </el-dropdown>
+            </div>
             <!-- 持续采集：等待开播 -->
             <div v-if="socketStatus === 'waiting'" class="playerTip waitTip">
-                <span class="waitTitle">
-                    <i class="dot"></i>主播还没开播，等待中
-                </span>
-                <span>
-                    每 {{ WAIT_LIVE_INTERVAL / 1000 }} 秒检查一次，开播后自动开始采集
-                </span>
+                <span class="waitTitle"><i class="dot"></i>主播还没开播，等待中</span>
+                <span>每 {{ waitLiveSeconds }} 秒检查一次，开播后自动开始采集</span>
                 <span>已检查 {{ waitChecks }} 次</span>
             </div>
             <div v-else-if="liveInfo.status === 0" class="playerTip">
                 输入直播间地址，点击「开始采集」
             </div>
             <!-- 直播结束 -->
-            <div v-else-if="liveInfo.status === 4" class="playerTip">
-                直播已结束
-            </div>
+            <div v-else-if="liveInfo.status === 4" class="playerTip">直播已结束</div>
         </div>
     </section>
 </template>
@@ -86,17 +84,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { formatCount, formatDuration } from '@/utils/format'
-import {
-    diamond,
-    liveInfo,
-    liveStartAt,
-    liveStartKnown,
-    socketStatus,
-} from '@/live/state'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { diamond, liveInfo, liveStartAt, liveStartKnown, socketStatus } from '@/live/state'
+import { ArrowDown, Refresh } from '@element-plus/icons-vue'
 import {
     currentQuality,
+    hasVideo,
     qualities,
+    reloadVideo,
     switchQuality,
     toggleVideo,
     videoHidden,
@@ -105,7 +99,8 @@ import {
 const currentQualityName = computed(
     () => qualities.value.find((q) => q.key === currentQuality.value)?.name || '清晰度',
 )
-import { WAIT_LIVE_INTERVAL, waitChecks } from '@/live/collect'
+import { waitChecks } from '@/live/collect'
+import { waitLiveSeconds } from '@/live/settings'
 
 // 显示成「x.x万」时，鼠标移上去显示完整数字
 const stat = (label: string, raw: unknown, unit = '') => {
@@ -285,25 +280,30 @@ const durationTitle = computed(() =>
             height: 100%;
         }
 
-        // 清晰度按钮：叠在画面右上角，平时半透明
-        .qualityPicker {
+        // 重新加载、清晰度按钮：叠在画面右上角，平时半透明
+        .playerTools {
             position: absolute;
             top: 10px;
             right: 10px;
             z-index: 5;
+            display: flex;
+            align-items: center;
+            gap: 6px;
             opacity: 0.55;
             transition: opacity 0.15s;
         }
 
-        &:hover .qualityPicker {
+        &:hover .playerTools {
             opacity: 1;
         }
 
-        .qualityBtn {
+        .toolBtn {
             height: 24px;
-            padding: 0 8px;
+            min-width: 24px;
+            padding: 0 6px;
             display: flex;
             align-items: center;
+            justify-content: center;
             gap: 3px;
             border: 1px solid rgba(255, 255, 255, 0.25);
             border-radius: 4px;
