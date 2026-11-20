@@ -88,7 +88,11 @@ export const startListen = async () => {
         ElMessage.error('请先选择 exe 文件')
         return
     }
-    if (starting) return
+    // 上一次还在启动中：给个提示，不要没反应
+    if (starting) {
+        ElMessage.info('正在启动采集，请稍候')
+        return
+    }
     starting = true
     if (detectPlatform(url) === 'douyin' && loginState.value.level === 'warn') {
         ElMessage.warning(loginState.value.detail)
@@ -132,27 +136,54 @@ const startProcesses = async () => {
     }
 }
 
+// 获取直播间信息最长等多久。Rust 那边每次请求有 15 秒超时、最多请求两次，这里再兜底，
+// 保证无论如何都会结束，不会让「开始采集」一直处于启动中、点了没反应
+const ROOM_INFO_TIMEOUT = 45_000
+const withTimeout = <T>(task: Promise<T>, ms: number, message: string) =>
+    new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(message)), ms)
+        task.then(
+            (value) => {
+                clearTimeout(timer)
+                resolve(value)
+            },
+            (error) => {
+                clearTimeout(timer)
+                reject(error)
+            },
+        )
+    })
+
 const doStart = async (url: string, persist: boolean) => {
     // 先清空上一次的采集。exe 不在这里关闭：已经在运行就复用，只有点「停止」才关闭
     await stopCollect(false)
     // 启动后台/exe 期间点了停止，就不再继续
     const token = runtime.startToken
     runtime.persistUrl = persist ? url : ''
-    if (!(await startProcesses()) || token !== runtime.startToken) return
+    // 启动后台、等后台起来、获取直播间信息都要一点时间，按钮先显示「连接中」
+    socketStatus.value = 'connecting'
+    // 没有连上：状态回到未连接(只在这次启动还有效时改，避免覆盖新一次启动的状态)
+    const giveUp = () => {
+        if (token === runtime.startToken && socketStatus.value === 'connecting') {
+            socketStatus.value = 'closed'
+        }
+    }
+    if (!(await startProcesses()) || token !== runtime.startToken) return giveUp()
     if (!url) {
         // 没有填直播间：只启动后台和 exe
         collectPlatform.value = 'douyin'
         collecting.value = true
-        return
+        return giveUp()
     }
     if (persist) {
         // TikTok 先确认组件已安装，避免等到开播才弹安装提示
-        if (detectPlatform(url) === 'tiktok' && !(await ensureTikTokEnv())) return
+        if (detectPlatform(url) === 'tiktok' && !(await ensureTikTokEnv())) return giveUp()
         if (token !== runtime.startToken) return
         waitForLive(url, token)
         return
     }
-    await collectRoom(url, token, false)
+    const result = await collectRoom(url, token, false)
+    if (result !== 'live') giveUp()
 }
 
 // 采集一个直播间。quiet 为 true 时(持续采集的等待中)没开播不弹提示。
@@ -178,10 +209,14 @@ const collectRoom = async (url: string, token: number, quiet: boolean): Promise<
     let roomJson: LiveInfoImp
     let roomInfo: any
     try {
-        roomJson = await invoke('get_live_html', {
-            url,
-            cookie: douyinCookie.value.trim() || null,
-        })
+        roomJson = await withTimeout(
+            invoke<LiveInfoImp>('get_live_html', {
+                url,
+                cookie: douyinCookie.value.trim() || null,
+            }),
+            ROOM_INFO_TIMEOUT,
+            '获取直播间信息超时',
+        )
         roomInfo = JSON.parse(roomJson.room_info)
     } catch (e) {
         if (token !== runtime.startToken) return 'cancelled'
